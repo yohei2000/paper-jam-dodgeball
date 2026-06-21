@@ -167,6 +167,8 @@ type PropOptions = {
   rotationY?: number;
   radius?: number;
   parent?: THREE.Object3D;
+  breakable?: boolean;
+  dynamic?: boolean;
 };
 
 const atlasColumns = 4;
@@ -416,7 +418,7 @@ function addCourtCircle(x, z, radius, material = materials.paper) {
   return mesh;
 }
 
-function addBarrierBox({ x, z, sx, sz, height, y = 0, material, visualHeight = height }) {
+function addBarrierBox({ x, z, sx, sz, height, y = 0, material, visualHeight = height, breakable = true, kind = "barrier" }) {
   const mesh = makeBox({
     size: { x: sx, y: visualHeight, z: sz },
     position: { x, y: y + visualHeight / 2, z },
@@ -425,7 +427,17 @@ function addBarrierBox({ x, z, sx, sz, height, y = 0, material, visualHeight = h
   });
 
   barriers.push({
+    kind,
     mesh,
+    x,
+    z,
+    sx,
+    sz,
+    y,
+    material,
+    visualHeight,
+    breakable,
+    broken: false,
     minX: x - sx / 2,
     maxX: x + sx / 2,
     minZ: z - sz / 2,
@@ -465,6 +477,7 @@ function circleRectPenetration(x, z, radius, rect) {
 function isBlockedPoint(x, z, pad = 0.75) {
   return barriers.some(
     (barrier) =>
+      !barrier.broken &&
       x > barrier.minX - pad &&
       x < barrier.maxX + pad &&
       z > barrier.minZ - pad &&
@@ -486,6 +499,20 @@ function addCourtLine(x, z, sx, sz, material = materials.safetyOrange) {
   addStaticDetail(x, 0.075, z, sx, 0.045, sz, material);
 }
 
+function isNaturallyBreakableKind(kind) {
+  return (
+    kind.includes("wall-panel") ||
+    kind.includes("desk") ||
+    kind.includes("table") ||
+    kind.includes("counter") ||
+    kind.includes("cabinet") ||
+    kind.includes("locker") ||
+    kind.includes("shelf") ||
+    kind.includes("divider") ||
+    kind.includes("crate")
+  );
+}
+
 function addProp(kind, x, z, sx, sy, sz, material, mass = 1, options: PropOptions = {}) {
   const mesh = makeBox({
     size: { x: sx, y: sy, z: sz },
@@ -497,6 +524,8 @@ function addProp(kind, x, z, sx, sy, sz, material, mass = 1, options: PropOption
   const prop = {
     kind,
     mesh,
+    size: new THREE.Vector3(sx, sy, sz),
+    material,
     baseY: mesh.position.y,
     homeBaseY: mesh.position.y,
     floorY: sy / 2,
@@ -504,6 +533,9 @@ function addProp(kind, x, z, sx, sy, sz, material, mass = 1, options: PropOption
     homeRotation: mesh.rotation.clone(),
     radius: options.radius ?? Math.max(sx, sz) * 0.64,
     mass,
+    breakable: options.breakable ?? isNaturallyBreakableKind(kind),
+    dynamic: options.dynamic ?? false,
+    broken: false,
     holder: null,
     team: null,
     velocity: new THREE.Vector3(),
@@ -531,6 +563,8 @@ function addCylinderProp(kind, x, z, radius, height, material, mass = 1, options
   const prop = {
     kind,
     mesh,
+    size: new THREE.Vector3(radius * 2, height, radius * 2),
+    material,
     baseY: mesh.position.y,
     homeBaseY: mesh.position.y,
     floorY: height / 2,
@@ -538,6 +572,9 @@ function addCylinderProp(kind, x, z, radius, height, material, mass = 1, options
     homeRotation: mesh.rotation.clone(),
     radius: options.radius ?? radius * 1.2,
     mass,
+    breakable: options.breakable ?? isNaturallyBreakableKind(kind),
+    dynamic: options.dynamic ?? false,
+    broken: false,
     holder: null,
     team: null,
     velocity: new THREE.Vector3(),
@@ -563,7 +600,7 @@ function addStaticDetail(x, y, z, sx, sy, sz, material, parent = officeGroup) {
 }
 
 function addGlassPanel(x, z, sx, sz, height = 2.55) {
-  addBarrierBox({ x, z, sx, sz, height, material: materials.glass, visualHeight: height });
+  addBarrierBox({ x, z, sx, sz, height, material: materials.glass, visualHeight: height, kind: "glass-panel" });
   if (sx > sz) {
     for (let i = -sx / 2; i <= sx / 2; i += 1.8) {
       addStaticDetail(x + i, height / 2, z, 0.055, height + 0.08, 0.1, materials.glassEdge);
@@ -580,6 +617,26 @@ function addCeilingLight(x, z, sx, sz) {
   addStaticDetail(x, 4.58, z, sx + 0.16, 0.05, 0.05, materials.glassEdge);
   addStaticDetail(x, 4.58, z - sz / 2, sx + 0.16, 0.05, 0.05, materials.glassEdge);
   addStaticDetail(x, 4.58, z + sz / 2, sx + 0.16, 0.05, 0.05, materials.glassEdge);
+}
+
+function addBreakableWallStrip(x, z, sx, sz) {
+  const alongX = sx >= sz;
+  const length = alongX ? sx : sz;
+  const panelCount = Math.max(4, Math.ceil(length / 3.2));
+  const panelLength = length / panelCount;
+
+  for (let i = 0; i < panelCount; i += 1) {
+    const offset = -length / 2 + panelLength * (i + 0.5);
+    const px = alongX ? x + offset : x;
+    const pz = alongX ? z : z + offset;
+    const panelSx = alongX ? panelLength * 0.96 : sx;
+    const panelSz = alongX ? sz : panelLength * 0.96;
+    addProp("outer-wall-panel", px, pz, panelSx, 2.6, panelSz, materials.warmWall, 4.4, {
+      y: 1.45,
+      radius: Math.max(panelSx, panelSz) * 0.58,
+      breakable: true,
+    });
+  }
 }
 
 function buildOfficeShell() {
@@ -620,12 +677,12 @@ function buildOfficeShell() {
 
   for (const z of [-10.7, 10.7]) {
     addStaticDetail(0, 0.12, z, ARENA.width + 0.8, 0.24, 0.28, materials.wallTrim);
-    addStaticDetail(0, 1.45, z + Math.sign(z) * 0.22, ARENA.width + 0.4, 2.6, 0.2, materials.warmWall);
+    addBreakableWallStrip(0, z + Math.sign(z) * 0.22, ARENA.width + 0.4, 0.2);
   }
 
   for (const x of [-18.9, 18.9]) {
     addStaticDetail(x, 0.12, 0, 0.28, 0.24, ARENA.depth + 0.8, materials.wallTrim);
-    addStaticDetail(x + Math.sign(x) * 0.22, 1.45, 0, 0.2, 2.6, ARENA.depth + 0.4, materials.warmWall);
+    addBreakableWallStrip(x + Math.sign(x) * 0.22, 0, 0.2, ARENA.depth + 0.4);
   }
 
   for (let x = -15; x <= 15; x += 5) {
@@ -1098,6 +1155,7 @@ function propHeldBy(player) {
 }
 
 function canThrowProp(prop) {
+  if (prop.broken) return false;
   if (prop.holder || prop.air || prop.pickupCooldown > 0) return false;
   if (prop.mass > MAX_THROWABLE_PROP_MASS || prop.radius > MAX_THROWABLE_PROP_RADIUS) return false;
   const fixedFragments = [
@@ -1284,6 +1342,7 @@ function hitPlayerWithProp(player, prop) {
 }
 
 function isActivePropProjectile(prop) {
+  if (prop.broken) return false;
   if (prop.holder || prop.chainCooldown > 0) return false;
   const planarSpeed = length2(prop.velocity.x, prop.velocity.z);
   return planarSpeed > 1.25 || Math.abs(prop.velocity.y) > 1.0 || (prop.team && prop.throwAge < 2.25);
@@ -1294,7 +1353,7 @@ function resolvePropToPropImpacts(prop) {
 
   const speed = Math.max(0.1, length2(prop.velocity.x, prop.velocity.z));
   for (const other of props) {
-    if (other === prop || other.holder || other.chainCooldown > 0) continue;
+    if (other === prop || other.broken || other.holder || other.chainCooldown > 0) continue;
     const dx = other.mesh.position.x - prop.mesh.position.x;
     const dz = other.mesh.position.z - prop.mesh.position.z;
     const dist = length2(dx, dz);
@@ -1338,12 +1397,129 @@ function resolvePropToPropImpacts(prop) {
   }
 }
 
+function fractureThresholdForProp(prop) {
+  if (prop.kind.includes("wall-panel")) return 4.9;
+  if (prop.kind.includes("divider") || prop.kind.includes("crate")) return 3.8;
+  if (prop.kind.includes("desk") || prop.kind.includes("table") || prop.kind.includes("counter")) return 4.7;
+  if (prop.kind.includes("cabinet") || prop.kind.includes("locker") || prop.kind.includes("shelf")) return 5.6;
+  return 5.1;
+}
+
+function fracturePieceCount(kind, span) {
+  if (kind.includes("wall-panel")) return clamp(Math.ceil(span * 1.3), 5, 12);
+  if (kind.includes("desk") || kind.includes("table") || kind.includes("counter")) return 8;
+  if (kind.includes("cabinet") || kind.includes("locker") || kind.includes("shelf")) return 6;
+  return 5;
+}
+
+function fragmentVelocity(position, impulse, sourcePosition, scale = 0.38) {
+  const awayX = position.x - sourcePosition.x;
+  const awayZ = position.z - sourcePosition.z;
+  const awayLen = Math.max(0.001, length2(awayX, awayZ));
+  return new THREE.Vector3(
+    impulse.x * scale + (awayX / awayLen) * rand(1.8, 5.4),
+    rand(0.8, 2.8) + Math.min(1.6, Math.abs(impulse.y) * 0.12),
+    impulse.z * scale + (awayZ / awayLen) * rand(1.8, 5.4),
+  );
+}
+
+function fractureProp(prop, impulse, sourcePosition) {
+  if (!prop.breakable || prop.dynamic || prop.broken) return false;
+
+  prop.broken = true;
+  prop.mesh.visible = false;
+  prop.holder = null;
+  prop.team = null;
+  prop.air = false;
+  prop.velocity.set(0, 0, 0);
+  prop.spin.set(0, 0, 0);
+
+  const size = prop.size;
+  const alongX = size.x >= size.z;
+  const span = Math.max(size.x, size.z);
+  const count = fracturePieceCount(prop.kind, span);
+  const center = prop.mesh.position.clone();
+  const isWall = prop.kind.includes("wall-panel");
+
+  for (let i = 0; i < count; i += 1) {
+    const offset = -span / 2 + (span / count) * (i + 0.5) + rand(-0.14, 0.14);
+    const px = center.x + (alongX ? offset : rand(-size.x * 0.32, size.x * 0.32));
+    const pz = center.z + (alongX ? rand(-size.z * 0.32, size.z * 0.32) : offset);
+    const pieceSx = isWall ? (alongX ? Math.max(0.42, (size.x / count) * rand(0.55, 1.05)) : rand(0.18, 0.34)) : rand(0.36, Math.max(0.48, size.x * 0.42));
+    const pieceSy = isWall ? rand(0.38, 1.05) : rand(0.16, Math.max(0.28, size.y * 0.7));
+    const pieceSz = isWall ? (alongX ? rand(0.16, 0.32) : Math.max(0.42, (size.z / count) * rand(0.55, 1.05))) : rand(0.28, Math.max(0.42, size.z * 0.42));
+    const fragment = addProp(`${prop.kind}-fragment`, px, pz, pieceSx, pieceSy, pieceSz, prop.material, Math.max(0.16, prop.mass / count), {
+      y: Math.max(pieceSy / 2, center.y + rand(isWall ? -0.7 : -0.18, isWall ? 0.75 : 0.24)),
+      rotationY: prop.mesh.rotation.y + rand(-0.8, 0.8),
+      radius: Math.max(pieceSx, pieceSz) * 0.72,
+      dynamic: true,
+      breakable: false,
+    });
+
+    fragment.baseY = fragment.floorY;
+    fragment.air = true;
+    fragment.velocity.copy(fragmentVelocity(fragment.mesh.position, impulse, sourcePosition, isWall ? 0.28 : 0.34));
+    fragment.spin.set(rand(-1.4, 1.4), rand(-3.2, 3.2), rand(-1.4, 1.4));
+    fragment.pickupCooldown = 0.75;
+    fragment.chainCooldown = 0.08;
+    fragment.impactCooldown = 0.1;
+  }
+
+  chaos = clamp(chaos + (isWall ? 10 : 7), 0, 100);
+  spawnPaperBurst(center, isWall ? 12 : 8, impulse, true);
+  return true;
+}
+
+function fractureBarrier(barrier, impulse, sourcePosition) {
+  if (!barrier.breakable || barrier.broken) return false;
+
+  barrier.broken = true;
+  barrier.mesh.visible = false;
+
+  const alongX = barrier.sx >= barrier.sz;
+  const span = Math.max(barrier.sx, barrier.sz);
+  const count = clamp(Math.ceil(span * 1.2), 4, 12);
+  const center = barrier.mesh.position.clone();
+  const isGlass = barrier.kind.includes("glass") || barrier.material === materials.glass;
+
+  for (let i = 0; i < count; i += 1) {
+    const offset = -span / 2 + (span / count) * (i + 0.5) + rand(-0.1, 0.1);
+    const px = barrier.x + (alongX ? offset : rand(-barrier.sx * 0.3, barrier.sx * 0.3));
+    const pz = barrier.z + (alongX ? rand(-barrier.sz * 0.3, barrier.sz * 0.3) : offset);
+    const pieceSx = alongX ? Math.max(0.34, (barrier.sx / count) * rand(0.55, 1.0)) : rand(0.12, 0.26);
+    const pieceSz = alongX ? rand(0.12, 0.26) : Math.max(0.34, (barrier.sz / count) * rand(0.55, 1.0));
+    const pieceSy = rand(0.28, Math.max(0.5, barrier.visualHeight * 0.5));
+    const fragment = addProp(`${barrier.kind}-fragment`, px, pz, pieceSx, pieceSy, pieceSz, barrier.material, isGlass ? 0.12 : 0.28, {
+      y: Math.max(pieceSy / 2, center.y + rand(-0.45, 0.45)),
+      rotationY: rand(-0.4, 0.4),
+      radius: Math.max(pieceSx, pieceSz) * 0.72,
+      dynamic: true,
+      breakable: false,
+    });
+    fragment.baseY = fragment.floorY;
+    fragment.air = true;
+    fragment.velocity.copy(fragmentVelocity(fragment.mesh.position, impulse, sourcePosition, isGlass ? 0.22 : 0.32));
+    fragment.spin.set(rand(-1.8, 1.8), rand(-3.8, 3.8), rand(-1.8, 1.8));
+    fragment.pickupCooldown = 0.7;
+    fragment.chainCooldown = 0.08;
+    fragment.impactCooldown = 0.1;
+  }
+
+  chaos = clamp(chaos + (isGlass ? 8 : 6), 0, 100);
+  spawnPaperBurst(center, isGlass ? 14 : 7, impulse, true);
+  return true;
+}
+
 function kickProp(prop, impulse, sourcePosition, options: { force?: boolean; dropToFloor?: boolean } = {}) {
   const strength = impulse.length();
   if (prop.impactCooldown > 0 && !options.force) return;
 
   if (options.dropToFloor || strength > 2.6 || prop.mesh.position.y > prop.floorY + 0.22) {
     prop.baseY = prop.floorY;
+  }
+
+  if (strength >= fractureThresholdForProp(prop) && fractureProp(prop, impulse, sourcePosition)) {
+    return;
   }
 
   const flutter = isFlutterProp(prop);
@@ -1387,6 +1563,7 @@ function kickProp(prop, impulse, sourcePosition, options: { force?: boolean; dro
 
 function resolveBarriersForEntity(position, radius, velocity = null, height = 1) {
   for (const barrier of barriers) {
+    if (barrier.broken) continue;
     if (position.y > barrier.height + height) continue;
     const hit = circleRectPenetration(position.x, position.z, radius, barrier);
     if (!hit) continue;
@@ -1486,7 +1663,7 @@ function updatePlayers(dt) {
     resolveBarriersForEntity(player.group.position, player.radius, player.velocity, 1.2);
 
     for (const prop of props) {
-      if (prop.holder) continue;
+      if (prop.broken || prop.holder) continue;
       const dx = player.group.position.x - prop.mesh.position.x;
       const dz = player.group.position.z - prop.mesh.position.z;
       const dist = length2(dx, dz);
@@ -1553,9 +1730,17 @@ function updateBalls(dt) {
     }
 
     for (const barrier of barriers) {
+      if (barrier.broken) continue;
       if (ball.mesh.position.y > barrier.height + ball.radius) continue;
       const hit = circleRectPenetration(ball.mesh.position.x, ball.mesh.position.z, ball.radius, barrier);
       if (!hit) continue;
+      if (barrier.breakable && ball.velocity.length() > 5.0) {
+        fractureBarrier(barrier, ball.velocity.clone().multiplyScalar(0.42), ball.mesh.position);
+        ball.velocity.multiplyScalar(0.68);
+        ball.velocity.y += rand(0.25, 0.85);
+        chaos = clamp(chaos + 2.5, 0, 100);
+        continue;
+      }
       ball.mesh.position.x += hit.nx * hit.penetration;
       ball.mesh.position.z += hit.nz * hit.penetration;
       const dot = ball.velocity.x * hit.nx + ball.velocity.z * hit.nz;
@@ -1594,7 +1779,7 @@ function updateBalls(dt) {
 
     if (!ball.airborne) continue;
     for (const prop of props) {
-      if (prop.holder) continue;
+      if (prop.broken || prop.holder) continue;
       const dx = prop.mesh.position.x - ball.mesh.position.x;
       const dy = prop.mesh.position.y - ball.mesh.position.y;
       const dz = prop.mesh.position.z - ball.mesh.position.z;
@@ -1612,6 +1797,7 @@ function updateBalls(dt) {
 
 function updateProps(dt) {
   for (const prop of props) {
+    if (prop.broken) continue;
     prop.impactCooldown = Math.max(0, prop.impactCooldown - dt);
     prop.pickupCooldown = Math.max(0, prop.pickupCooldown - dt);
     prop.chainCooldown = Math.max(0, prop.chainCooldown - dt);
@@ -1668,9 +1854,17 @@ function updateProps(dt) {
     }
 
     for (const barrier of barriers) {
+      if (barrier.broken) continue;
       if (prop.mesh.position.y > barrier.height + prop.radius) continue;
       const hit = circleRectPenetration(prop.mesh.position.x, prop.mesh.position.z, prop.radius * 0.68, barrier);
       if (!hit) continue;
+      if (barrier.breakable && isActivePropProjectile(prop) && prop.velocity.length() > 2.4) {
+        fractureBarrier(barrier, prop.velocity.clone().multiplyScalar(0.52), prop.mesh.position);
+        prop.velocity.multiplyScalar(0.66);
+        prop.velocity.y = Math.max(prop.velocity.y, 0.18);
+        chaos = clamp(chaos + 2.2, 0, 100);
+        continue;
+      }
       prop.mesh.position.x += hit.nx * hit.penetration;
       prop.mesh.position.z += hit.nz * hit.penetration;
       const dot = prop.velocity.x * hit.nx + prop.velocity.z * hit.nz;
@@ -1819,7 +2013,16 @@ function resetMatch() {
     resetBall(ball);
   }
 
-  for (const prop of props) {
+  for (let i = props.length - 1; i >= 0; i -= 1) {
+    const prop = props[i];
+    if (prop.dynamic) {
+      scene.remove(prop.mesh);
+      props.splice(i, 1);
+      continue;
+    }
+
+    prop.broken = false;
+    prop.mesh.visible = true;
     prop.holder = null;
     prop.team = null;
     prop.baseY = prop.homeBaseY;
@@ -1832,6 +2035,11 @@ function resetMatch() {
     prop.impactCooldown = 0;
     prop.pickupCooldown = 0;
     prop.chainCooldown = 0;
+  }
+
+  for (const barrier of barriers) {
+    barrier.broken = false;
+    barrier.mesh.visible = true;
   }
 
   updateHud();
@@ -1889,8 +2097,11 @@ window.__voxelOfficeDodgeball = {
     throwablePropCount: props.filter((prop) => canThrowProp(prop)).length,
     heldPropCount: props.filter((prop) => prop.holder).length,
     activePropCount: props.filter((prop) => length2(prop.velocity.x, prop.velocity.z) > 0.2 || prop.air).length,
+    brokenPropCount: props.filter((prop) => prop.broken).length,
+    dynamicFragmentCount: props.filter((prop) => prop.dynamic).length,
     particleCount: particles.length,
     barrierCount: barriers.length,
+    brokenBarrierCount: barriers.filter((barrier) => barrier.broken).length,
     blueScore,
     redScore,
     chaos: Math.round(chaos),
