@@ -29,6 +29,9 @@ const ARENA = { width: 38, depth: 24, halfW: 19, halfD: 12 };
 const MATCH_LENGTH = 150;
 const PLAYER_COUNT = 5;
 const BALL_COUNT = 6;
+const PROP_THROW_CHANCE = 0.42;
+const MAX_THROWABLE_PROP_MASS = 1.08;
+const MAX_THROWABLE_PROP_RADIUS = 1.05;
 const cameraModes = ["iso", "top", "sideline"];
 
 const palette = {
@@ -495,14 +498,21 @@ function addProp(kind, x, z, sx, sy, sz, material, mass = 1, options: PropOption
     kind,
     mesh,
     baseY: mesh.position.y,
+    homeBaseY: mesh.position.y,
+    floorY: sy / 2,
     homePosition: mesh.position.clone(),
     homeRotation: mesh.rotation.clone(),
     radius: options.radius ?? Math.max(sx, sz) * 0.64,
     mass,
+    holder: null,
+    team: null,
     velocity: new THREE.Vector3(),
     spin: new THREE.Vector3(),
     air: false,
+    throwAge: 99,
     impactCooldown: 0,
+    pickupCooldown: 0,
+    chainCooldown: 0,
     health: 1,
   };
   props.push(prop);
@@ -522,14 +532,21 @@ function addCylinderProp(kind, x, z, radius, height, material, mass = 1, options
     kind,
     mesh,
     baseY: mesh.position.y,
+    homeBaseY: mesh.position.y,
+    floorY: height / 2,
     homePosition: mesh.position.clone(),
     homeRotation: mesh.rotation.clone(),
     radius: options.radius ?? radius * 1.2,
     mass,
+    holder: null,
+    team: null,
     velocity: new THREE.Vector3(),
     spin: new THREE.Vector3(),
     air: false,
+    throwAge: 99,
     impactCooldown: 0,
+    pickupCooldown: 0,
+    chainCooldown: 0,
     health: 1,
   };
   props.push(prop);
@@ -1076,6 +1093,50 @@ function ballHeldBy(player) {
   return balls.find((ball) => ball.holder === player) ?? null;
 }
 
+function propHeldBy(player) {
+  return props.find((prop) => prop.holder === player) ?? null;
+}
+
+function canThrowProp(prop) {
+  if (prop.holder || prop.air || prop.pickupCooldown > 0) return false;
+  if (prop.mass > MAX_THROWABLE_PROP_MASS || prop.radius > MAX_THROWABLE_PROP_RADIUS) return false;
+  const fixedFragments = [
+    "desk",
+    "table",
+    "sofa",
+    "counter",
+    "cabinet",
+    "shelf",
+    "machine",
+    "copier",
+    "printer",
+    "whiteboard",
+    "divider",
+    "locker",
+    "storage",
+    "lounge",
+    "reception",
+    "plant-stem",
+  ];
+  return !fixedFragments.some((fragment) => prop.kind.includes(fragment));
+}
+
+function nearestThrowableProp(player) {
+  let best = null;
+  let bestDist = Infinity;
+  for (const prop of props) {
+    if (!canThrowProp(prop)) continue;
+    const dx = prop.mesh.position.x - player.group.position.x;
+    const dz = prop.mesh.position.z - player.group.position.z;
+    const dist = dx * dx + dz * dz;
+    if (dist < bestDist) {
+      bestDist = dist;
+      best = prop;
+    }
+  }
+  return bestDist < 92 ? best : null;
+}
+
 function throwBall(player, ball, target) {
   const from = player.group.position;
   const to = target.group.position;
@@ -1147,10 +1208,144 @@ function isSmallLooseProp(prop) {
   return isFlutterProp(prop) || prop.kind.includes("cup") || prop.kind.includes("binder") || prop.kind.includes("cable");
 }
 
-function kickProp(prop, impulse, sourcePosition) {
-  if (prop.impactCooldown > 0) return;
+function holdProp(player, prop) {
+  prop.holder = player;
+  prop.team = player.team;
+  prop.air = false;
+  prop.throwAge = 0;
+  prop.velocity.set(0, 0, 0);
+  prop.spin.set(0, 0, 0);
+  prop.pickupCooldown = 0.25;
+  prop.chainCooldown = 0;
+  chaos = clamp(chaos + 0.8, 0, 100);
+}
 
+function throwProp(player, prop, target) {
+  const from = player.group.position;
+  const to = target.group.position;
+  const dx = to.x - from.x;
+  const dz = to.z - from.z;
+  const dist = Math.max(1, length2(dx, dz));
+  const leadX = target.velocity.x * 0.34;
+  const leadZ = target.velocity.z * 0.34;
+  const flutter = isFlutterProp(prop);
+  const speed = clamp(13.6 + Math.min(4.4, dist * 0.26) - prop.mass * 1.9 + chaos * 0.016, 8.4, 16.2);
+  const inv = 1 / Math.max(0.001, length2(dx + leadX, dz + leadZ));
+
+  prop.holder = null;
+  prop.team = player.team;
+  prop.air = true;
+  prop.throwAge = 0;
+  prop.baseY = prop.floorY;
+  prop.mesh.position.set(from.x + (player.team === "blue" ? 0.45 : -0.45), 1.32, from.z + 0.1);
+  prop.velocity.set(
+    (dx + leadX) * inv * speed,
+    flutter ? rand(1.25, 2.15) : rand(2.05, 3.15),
+    (dz + leadZ) * inv * speed,
+  );
+  prop.spin.y = rand(-2.6, 2.6);
+  prop.spin.x = rand(-0.9, 0.9);
+  prop.spin.z = rand(-0.9, 0.9);
+  prop.impactCooldown = 0.12;
+  prop.pickupCooldown = 1.25;
+  prop.chainCooldown = 0.04;
+  prop.health -= 0.08;
+  player.cooldown = rand(0.68, 1.18);
+  player.lean = player.team === "blue" ? -0.36 : 0.36;
+  chaos = clamp(chaos + (flutter ? 2.2 : 3.4), 0, 100);
+
+  if (flutter) {
+    spawnPaperBurst(prop.mesh.position, 3, prop.velocity, true);
+  }
+}
+
+function hitPlayerWithProp(player, prop) {
+  const impulse = prop.velocity.clone().multiplyScalar(0.075);
+  player.velocity.add(new THREE.Vector3(impulse.x, 0, impulse.z));
+  player.stun = 0.68 + Math.min(0.55, prop.velocity.length() * 0.025);
+  player.lean = prop.velocity.x > 0 ? 0.52 : -0.52;
+
+  if (prop.team === "blue") {
+    blueScore += 1;
+  } else if (prop.team === "red") {
+    redScore += 1;
+  }
+
+  chaos = clamp(chaos + 6.5, 0, 100);
+  spawnPaperBurst(player.group.position, isFlutterProp(prop) ? 9 : 6, prop.velocity, true);
+  prop.team = null;
+  prop.throwAge = 99;
+  prop.pickupCooldown = 0.95;
+  prop.chainCooldown = 0.18;
+  prop.impactCooldown = 0.18;
+  prop.velocity.multiplyScalar(-0.18);
+  prop.velocity.y = Math.max(prop.velocity.y, rand(0.18, 0.52));
+  prop.spin.multiplyScalar(0.45);
+}
+
+function isActivePropProjectile(prop) {
+  if (prop.holder || prop.chainCooldown > 0) return false;
+  const planarSpeed = length2(prop.velocity.x, prop.velocity.z);
+  return planarSpeed > 1.25 || Math.abs(prop.velocity.y) > 1.0 || (prop.team && prop.throwAge < 2.25);
+}
+
+function resolvePropToPropImpacts(prop) {
+  if (!isActivePropProjectile(prop)) return;
+
+  const speed = Math.max(0.1, length2(prop.velocity.x, prop.velocity.z));
+  for (const other of props) {
+    if (other === prop || other.holder || other.chainCooldown > 0) continue;
+    const dx = other.mesh.position.x - prop.mesh.position.x;
+    const dz = other.mesh.position.z - prop.mesh.position.z;
+    const dist = length2(dx, dz);
+    const hitRadius = Math.min(1.25, prop.radius * 0.58 + other.radius * 0.58);
+    const verticalGap = Math.abs(other.mesh.position.y - prop.mesh.position.y);
+    if (dist >= hitRadius || verticalGap > Math.max(0.75, other.radius + 0.55)) continue;
+
+    const nx = dist > 0.001 ? dx / dist : rand(-1, 1);
+    const nz = dist > 0.001 ? dz / dist : rand(-1, 1);
+    const overlap = hitRadius - Math.max(0.001, dist);
+    prop.mesh.position.x -= nx * overlap * 0.42;
+    prop.mesh.position.z -= nz * overlap * 0.42;
+    other.mesh.position.x += nx * overlap * 0.58;
+    other.mesh.position.z += nz * overlap * 0.58;
+
+    const impulse = prop.velocity.clone().multiplyScalar(clamp(0.34 + speed * 0.035, 0.38, 0.78));
+    impulse.x += nx * speed * 0.34;
+    impulse.z += nz * speed * 0.34;
+    impulse.y = Math.max(impulse.y, isFlutterProp(other) ? rand(0.55, 1.4) : rand(0.18, 0.72));
+
+    other.baseY = other.floorY;
+    kickProp(other, impulse, prop.mesh.position, { force: true, dropToFloor: true });
+    if (prop.team && prop.throwAge < 2.25) {
+      other.team = prop.team;
+      other.throwAge = 0.12;
+    }
+
+    const dot = prop.velocity.x * nx + prop.velocity.z * nz;
+    if (dot > 0) {
+      prop.velocity.x -= nx * dot * 0.72;
+      prop.velocity.z -= nz * dot * 0.72;
+    }
+    prop.velocity.multiplyScalar(isFlutterProp(prop) ? 0.74 : 0.58);
+    prop.velocity.y = Math.max(prop.velocity.y, isFlutterProp(prop) ? 0.24 : 0.12);
+    prop.spin.y += rand(-0.8, 0.8);
+    prop.chainCooldown = 0.08;
+    other.chainCooldown = 0.1;
+    chaos = clamp(chaos + (isSmallLooseProp(other) ? 2.8 : 4.4), 0, 100);
+    spawnPaperBurst(prop.mesh.position, isFlutterProp(other) ? 5 : 3, impulse, true);
+    break;
+  }
+}
+
+function kickProp(prop, impulse, sourcePosition, options: { force?: boolean; dropToFloor?: boolean } = {}) {
   const strength = impulse.length();
+  if (prop.impactCooldown > 0 && !options.force) return;
+
+  if (options.dropToFloor || strength > 2.6 || prop.mesh.position.y > prop.floorY + 0.22) {
+    prop.baseY = prop.floorY;
+  }
+
   const flutter = isFlutterProp(prop);
   const loose = isSmallLooseProp(prop);
   const invMass = 1 / Math.max(0.72, prop.mass);
@@ -1213,22 +1408,42 @@ function updatePlayers(dt) {
     player.stun = Math.max(0, player.stun - dt);
     player.dodge += dt * (1.55 + player.index * 0.17);
 
-    const held = ballHeldBy(player);
+    let heldBall = ballHeldBy(player);
+    let heldProp = propHeldBy(player);
     const opponent = nearestOpponent(player);
 
-    if (held && opponent && player.cooldown <= 0 && player.stun <= 0) {
-      throwBall(player, held, opponent);
+    if (heldBall && opponent && player.cooldown <= 0 && player.stun <= 0) {
+      throwBall(player, heldBall, opponent);
+      heldBall = null;
+    } else if (heldProp && opponent && player.cooldown <= 0 && player.stun <= 0) {
+      throwProp(player, heldProp, opponent);
+      heldProp = null;
     }
 
-    if (!held && player.stun <= 0) {
+    const holding = heldBall || heldProp;
+
+    if (!holding && player.stun <= 0) {
       const freeBall = nearestFreeBall(player);
-      if (freeBall) {
+      const looseProp = nearestThrowableProp(player);
+      const preferProp = looseProp && (!freeBall || Math.random() < PROP_THROW_CHANCE + chaos * 0.003);
+
+      if (preferProp) {
+        const dx = looseProp.mesh.position.x - player.group.position.x;
+        const dz = looseProp.mesh.position.z - player.group.position.z;
+        if (length2(dx, dz) < 1.02 + looseProp.radius * 0.32) {
+          holdProp(player, looseProp);
+          heldProp = looseProp;
+        } else if (Math.random() < 0.035) {
+          player.target.set(looseProp.mesh.position.x, 0, looseProp.mesh.position.z);
+        }
+      } else if (freeBall) {
         const dx = freeBall.mesh.position.x - player.group.position.x;
         const dz = freeBall.mesh.position.z - player.group.position.z;
         if (length2(dx, dz) < 1.08) {
           freeBall.holder = player;
           freeBall.team = player.team;
           freeBall.airborne = false;
+          heldBall = freeBall;
         } else if (Math.random() < 0.024) {
           player.target.set(freeBall.mesh.position.x, 0, freeBall.mesh.position.z);
         }
@@ -1248,7 +1463,8 @@ function updatePlayers(dt) {
     const targetLen = Math.max(0.001, length2(toTarget.x, toTarget.z));
     toTarget.multiplyScalar(1 / targetLen);
 
-    if (opponent && !held) {
+    const stillHolding = heldBall || heldProp;
+    if (opponent && !stillHolding) {
       const awayX = player.group.position.x - opponent.group.position.x;
       const awayZ = player.group.position.z - opponent.group.position.z;
       const awayLen = Math.max(0.001, length2(awayX, awayZ));
@@ -1259,7 +1475,7 @@ function updatePlayers(dt) {
     }
 
     toTarget.z += Math.sin(player.dodge) * 0.34;
-    const moveSpeed = player.stun > 0 ? 1.35 : 4.25 + (held ? 0.38 : 0);
+    const moveSpeed = player.stun > 0 ? 1.35 : 4.25 + (heldBall ? 0.38 : 0) - (heldProp ? 0.18 : 0);
     const desired = toTarget.multiplyScalar(moveSpeed);
     player.velocity.lerp(desired, player.stun > 0 ? 0.025 : 0.08);
 
@@ -1270,6 +1486,7 @@ function updatePlayers(dt) {
     resolveBarriersForEntity(player.group.position, player.radius, player.velocity, 1.2);
 
     for (const prop of props) {
+      if (prop.holder) continue;
       const dx = player.group.position.x - prop.mesh.position.x;
       const dz = player.group.position.z - prop.mesh.position.z;
       const dist = length2(dx, dz);
@@ -1289,14 +1506,25 @@ function updatePlayers(dt) {
     player.group.rotation.z = player.lean;
     player.group.position.y = Math.max(0, Math.sin(performance.now() * 0.012 + player.index) * 0.035);
 
-    if (held) {
-      held.mesh.position.set(
+    if (heldBall) {
+      heldBall.mesh.position.set(
         player.group.position.x + (player.team === "blue" ? 0.58 : -0.58),
         1.2,
         player.group.position.z + 0.2,
       );
-      held.mesh.rotation.x += dt * 8;
-      held.mesh.rotation.z += dt * 4.4;
+      heldBall.mesh.rotation.x += dt * 8;
+      heldBall.mesh.rotation.z += dt * 4.4;
+    }
+
+    if (heldProp) {
+      heldProp.mesh.position.set(
+        player.group.position.x + (player.team === "blue" ? 0.62 : -0.62),
+        1.18 + Math.min(0.42, heldProp.radius * 0.35),
+        player.group.position.z + 0.12,
+      );
+      heldProp.mesh.rotation.y = THREE.MathUtils.lerp(heldProp.mesh.rotation.y, player.group.rotation.y, 0.24);
+      heldProp.mesh.rotation.x += dt * (isFlutterProp(heldProp) ? 2.4 : 0.9);
+      heldProp.mesh.rotation.z += dt * (player.team === "blue" ? 0.55 : -0.55);
     }
   }
 }
@@ -1366,13 +1594,14 @@ function updateBalls(dt) {
 
     if (!ball.airborne) continue;
     for (const prop of props) {
+      if (prop.holder) continue;
       const dx = prop.mesh.position.x - ball.mesh.position.x;
       const dy = prop.mesh.position.y - ball.mesh.position.y;
       const dz = prop.mesh.position.z - ball.mesh.position.z;
       const dist = Math.sqrt(dx * dx + dy * dy + dz * dz);
       if (dist < prop.radius + ball.radius) {
         const impulse = ball.velocity.clone().multiplyScalar(0.44);
-        kickProp(prop, impulse, ball.mesh.position);
+        kickProp(prop, impulse, ball.mesh.position, { dropToFloor: true });
         ball.velocity.multiplyScalar(-0.22);
         ball.velocity.y += rand(0.3, 1.85);
         break;
@@ -1384,8 +1613,20 @@ function updateBalls(dt) {
 function updateProps(dt) {
   for (const prop of props) {
     prop.impactCooldown = Math.max(0, prop.impactCooldown - dt);
+    prop.pickupCooldown = Math.max(0, prop.pickupCooldown - dt);
+    prop.chainCooldown = Math.max(0, prop.chainCooldown - dt);
+
+    if (prop.holder) {
+      prop.air = false;
+      continue;
+    }
 
     const flutter = isFlutterProp(prop);
+    const planarSpeed = length2(prop.velocity.x, prop.velocity.z);
+    if (prop.team || prop.air || planarSpeed > 0.1) {
+      prop.throwAge += dt;
+    }
+
     const airborne = prop.air || prop.mesh.position.y > prop.baseY + 0.015 || Math.abs(prop.velocity.y) > 0.02;
 
     if (airborne) {
@@ -1452,6 +1693,21 @@ function updateProps(dt) {
       prop.spin.multiplyScalar(0.55);
     }
 
+    if (prop.team && prop.throwAge > 0.08 && prop.throwAge < 2.35) {
+      for (const player of players) {
+        if (player.team === prop.team || player.stun > 0.75) continue;
+        const dx = player.group.position.x - prop.mesh.position.x;
+        const dy = 1.0 - prop.mesh.position.y;
+        const dz = player.group.position.z - prop.mesh.position.z;
+        if (Math.sqrt(dx * dx + dy * dy + dz * dz) < player.radius + Math.min(0.72, prop.radius)) {
+          hitPlayerWithProp(player, prop);
+          break;
+        }
+      }
+    }
+
+    resolvePropToPropImpacts(prop);
+
     if (prop.mesh.position.y <= prop.baseY + 0.001) {
       prop.mesh.rotation.x = THREE.MathUtils.lerp(prop.mesh.rotation.x, prop.homeRotation.x, flutter ? 0.035 : 0.18);
       prop.mesh.rotation.z = THREE.MathUtils.lerp(prop.mesh.rotation.z, prop.homeRotation.z, flutter ? 0.035 : 0.18);
@@ -1465,6 +1721,9 @@ function updateProps(dt) {
       }
       if (prop.spin.length() < 0.035) {
         prop.spin.set(0, 0, 0);
+      }
+      if (length2(prop.velocity.x, prop.velocity.z) < 0.12 && prop.throwAge > 0.55) {
+        prop.team = null;
       }
     }
   }
@@ -1561,11 +1820,18 @@ function resetMatch() {
   }
 
   for (const prop of props) {
+    prop.holder = null;
+    prop.team = null;
+    prop.baseY = prop.homeBaseY;
     prop.mesh.position.copy(prop.homePosition);
     prop.mesh.rotation.copy(prop.homeRotation);
     prop.velocity.set(0, 0, 0);
     prop.spin.set(0, 0, 0);
     prop.air = false;
+    prop.throwAge = 99;
+    prop.impactCooldown = 0;
+    prop.pickupCooldown = 0;
+    prop.chainCooldown = 0;
   }
 
   updateHud();
@@ -1620,6 +1886,9 @@ window.__voxelOfficeDodgeball = {
     playerCount: players.length,
     ballCount: balls.length,
     propCount: props.length,
+    throwablePropCount: props.filter((prop) => canThrowProp(prop)).length,
+    heldPropCount: props.filter((prop) => prop.holder).length,
+    activePropCount: props.filter((prop) => length2(prop.velocity.x, prop.velocity.z) > 0.2 || prop.air).length,
     particleCount: particles.length,
     barrierCount: barriers.length,
     blueScore,
