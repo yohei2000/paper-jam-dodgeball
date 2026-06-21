@@ -2,7 +2,7 @@
 
 Generated with the built-in `image_gen` tool on 2026-06-21.
 
-The generated image appeared inline in the Codex session, but no recoverable local image file was found under the normal Codex image output folders. A second recovery attempt after regenerating the image at `2026-06-21T18:40:26.9834499+09:00` also found zero image files. The 3D scene in `src/main.js` implements this generated concept as procedural Three.js geometry.
+The generated image appeared inline in the Codex session, but no recoverable local image file was found under the normal Codex image output folders. A second recovery attempt after regenerating the image at `2026-06-21T18:40:26.9834499+09:00` also found zero image files. The 3D scene in `src/main.ts` implements this generated concept as procedural Three.js geometry.
 
 ```text
 Use case: stylized-concept
@@ -23,7 +23,7 @@ Avoid: text, labels, logos, watermarks, people, characters, messy unreadable clu
 
 Generated again with the built-in `image_gen` tool at `2026-06-21T19:25:31.8365359+09:00`.
 
-Filesystem recovery searched the normal Codex image roots and found zero image files. UI-level recovery was not attempted against the Codex desktop surface because the available Computer Use policy forbids automating the Codex desktop app UI. The v2 arena in `src/main.js` is therefore implemented from the visible generated concept and the prompt below as procedural Three.js geometry.
+Filesystem recovery searched the normal Codex image roots and found zero image files. UI-level recovery was not attempted against the Codex desktop surface because the available Computer Use policy forbids automating the Codex desktop app UI. The v2 arena in `src/main.ts` is therefore implemented from the visible generated concept and the prompt below as procedural Three.js geometry.
 
 ```text
 Use case: stylized-concept

@@ -1,15 +1,29 @@
 import * as THREE from "three";
 import "./styles.css";
 
-const canvas = document.querySelector("#game");
-const blueScoreEl = document.querySelector("#blueScore");
-const redScoreEl = document.querySelector("#redScore");
-const clockEl = document.querySelector("#clock");
-const chaosMeter = document.querySelector("#chaosMeter");
-const pauseButton = document.querySelector("#pauseButton");
-const cameraButton = document.querySelector("#cameraButton");
-const resetButton = document.querySelector("#resetButton");
-const speedSlider = document.querySelector("#speedSlider");
+declare global {
+  interface Window {
+    __voxelOfficeDodgeball?: {
+      metrics: () => unknown;
+    };
+  }
+}
+
+function requireElement<T extends Element>(selector: string) {
+  const element = document.querySelector<T>(selector);
+  if (!element) throw new Error(`Missing required element: ${selector}`);
+  return element;
+}
+
+const canvas = requireElement<HTMLCanvasElement>("#game");
+const blueScoreEl = requireElement<HTMLElement>("#blueScore");
+const redScoreEl = requireElement<HTMLElement>("#redScore");
+const clockEl = requireElement<HTMLElement>("#clock");
+const chaosMeter = requireElement<HTMLMeterElement>("#chaosMeter");
+const pauseButton = requireElement<HTMLButtonElement>("#pauseButton");
+const cameraButton = requireElement<HTMLButtonElement>("#cameraButton");
+const resetButton = requireElement<HTMLButtonElement>("#resetButton");
+const speedSlider = requireElement<HTMLInputElement>("#speedSlider");
 
 const ARENA = { width: 38, depth: 24, halfW: 19, halfD: 12 };
 const MATCH_LENGTH = 150;
@@ -135,8 +149,48 @@ function makeTileTexture() {
   return texture;
 }
 
-function mat(color, options = {}) {
-  const params = {
+type MaterialOptions = {
+  roughness?: number;
+  metalness?: number;
+  emissive?: number;
+  emissiveIntensity?: number;
+  transparent?: boolean;
+  opacity?: number;
+  map?: THREE.Texture;
+};
+
+type PropOptions = {
+  y?: number;
+  rotationY?: number;
+  radius?: number;
+  parent?: THREE.Object3D;
+};
+
+const atlasColumns = 4;
+const atlasRows = 5;
+const textureLoader = new THREE.TextureLoader();
+
+function configureAtlasTexture(texture: THREE.Texture) {
+  texture.colorSpace = THREE.SRGBColorSpace;
+  texture.magFilter = THREE.NearestFilter;
+  texture.minFilter = THREE.LinearMipmapLinearFilter;
+  texture.wrapS = THREE.ClampToEdgeWrapping;
+  texture.wrapT = THREE.ClampToEdgeWrapping;
+  return texture;
+}
+
+function atlasTileFrom(source: THREE.Texture, column: number, row: number) {
+  const texture = source.clone();
+  texture.image = source.image;
+  configureAtlasTexture(texture);
+  texture.repeat.set(1 / atlasColumns, 1 / atlasRows);
+  texture.offset.set(column / atlasColumns, 1 - (row + 1) / atlasRows);
+  texture.needsUpdate = true;
+  return texture;
+}
+
+function mat(color: number, options: MaterialOptions = {}) {
+  const params: THREE.MeshStandardMaterialParameters = {
     color,
     roughness: options.roughness ?? 0.68,
     metalness: options.metalness ?? 0,
@@ -156,14 +210,14 @@ function mat(color, options = {}) {
 const materials = {
   floor: mat(0xffffff, { map: makeTileTexture(), roughness: 0.58 }),
   floorLine: mat(palette.floorLine, { roughness: 0.72 }),
-  courtBlue: mat(0xcfe7f6, { roughness: 0.78 }),
-  courtRed: mat(0xf4d7d4, { roughness: 0.78 }),
+  courtBlue: mat(0xd6edf8, { roughness: 0.78 }),
+  courtRed: mat(0xf7d7d6, { roughness: 0.78 }),
   courtLane: mat(0xf4f8fb, { roughness: 0.62 }),
   blueTape: mat(0x38bdf8, { roughness: 0.54 }),
   redTape: mat(0xfb7185, { roughness: 0.54 }),
   safetyOrange: mat(0xf97316, { roughness: 0.48 }),
   carpetTeal: mat(0x6ab4aa, { roughness: 0.88 }),
-  carpetPlum: mat(0xa77aa7, { roughness: 0.86 }),
+  carpetPlum: mat(0xb27aa0, { roughness: 0.86 }),
   receptionStone: mat(0xd9dde2, { roughness: 0.46, metalness: 0.08 }),
   lockerBlue: mat(0x3b82f6, { roughness: 0.58, metalness: 0.08 }),
   lockerRed: mat(0xf43f5e, { roughness: 0.58, metalness: 0.08 }),
@@ -204,6 +258,55 @@ const materials = {
   lightPanel: mat(0xfff7da, { roughness: 0.18, emissive: 0xfff0b3, emissiveIntensity: 1.15 }),
   shadow: new THREE.MeshBasicMaterial({ color: 0x0f172a, transparent: true, opacity: 0.12 }),
 };
+
+type MaterialKey = keyof typeof materials;
+
+const atlasMaterialSlots: Array<[MaterialKey, number, number]> = [
+  ["floor", 0, 0],
+  ["floorLine", 1, 0],
+  ["courtBlue", 1, 0],
+  ["courtRed", 1, 0],
+  ["courtLane", 3, 0],
+  ["blueTape", 2, 2],
+  ["redTape", 3, 2],
+  ["safetyOrange", 0, 4],
+  ["carpetTeal", 0, 2],
+  ["carpetPlum", 1, 2],
+  ["receptionStone", 0, 0],
+  ["lockerBlue", 1, 4],
+  ["lockerRed", 2, 4],
+  ["cartGreen", 3, 3],
+  ["warmWall", 3, 4],
+  ["glass", 2, 1],
+  ["wood", 0, 1],
+  ["woodDark", 1, 1],
+  ["metal", 3, 1],
+  ["darkMetal", 2, 3],
+  ["rubber", 2, 3],
+  ["blue", 2, 2],
+  ["blueDark", 1, 4],
+  ["red", 3, 2],
+  ["redDark", 2, 4],
+  ["tealFabric", 0, 2],
+  ["coralFabric", 1, 2],
+  ["leaf", 3, 3],
+  ["paper", 0, 3],
+  ["ball", 0, 4],
+];
+
+function applyGeneratedTextureAtlas() {
+  textureLoader.load("/assets/textures/office-voxel-atlas-20260621.png", (source) => {
+    configureAtlasTexture(source);
+
+    for (const [key, column, row] of atlasMaterialSlots) {
+      const material = materials[key];
+      material.map = atlasTileFrom(source, column, row);
+      material.needsUpdate = true;
+    }
+  });
+}
+
+applyGeneratedTextureAtlas();
 
 const players = [];
 const balls = [];
@@ -339,7 +442,7 @@ function addCourtLine(x, z, sx, sz, material = materials.safetyOrange) {
   addStaticDetail(x, 0.075, z, sx, 0.045, sz, material);
 }
 
-function addProp(kind, x, z, sx, sy, sz, material, mass = 1, options = {}) {
+function addProp(kind, x, z, sx, sy, sz, material, mass = 1, options: PropOptions = {}) {
   const mesh = makeBox({
     size: { x: sx, y: sy, z: sz },
     position: { x, y: options.y ?? sy / 2, z },
@@ -364,7 +467,7 @@ function addProp(kind, x, z, sx, sy, sz, material, mass = 1, options = {}) {
   return prop;
 }
 
-function addCylinderProp(kind, x, z, radius, height, material, mass = 1, options = {}) {
+function addCylinderProp(kind, x, z, radius, height, material, mass = 1, options: PropOptions = {}) {
   const mesh = makeCylinder({
     radius,
     height,
@@ -1297,8 +1400,8 @@ function updateCamera(dt) {
 }
 
 function updateHud() {
-  blueScoreEl.textContent = blueScore;
-  redScoreEl.textContent = redScore;
+  blueScoreEl.textContent = String(blueScore);
+  redScoreEl.textContent = String(redScore);
   chaosMeter.value = Math.round(chaos);
   const time = Math.max(0, Math.ceil(gameTime));
   const minutes = String(Math.floor(time / 60)).padStart(2, "0");
@@ -1388,7 +1491,7 @@ cameraButton.addEventListener("click", () => {
 resetButton.addEventListener("click", resetMatch);
 
 speedSlider.addEventListener("input", (event) => {
-  speedScale = Number(event.target.value);
+  speedScale = Number((event.target as HTMLInputElement).value);
 });
 
 buildOffice();

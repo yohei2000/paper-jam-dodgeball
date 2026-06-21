@@ -23,9 +23,10 @@ https://yohei2000.github.io/paper-jam-dodgeball/
 
 ## Prototype Shape
 
-- Voxel-style 3D scene built with Three.js.
+- Voxel-style 3D scene built with Vite, TypeScript, and Three.js.
 - Fully automatic blue-vs-red dodgeball match.
 - Office arena modeled from the saved top-down office concept at `assets/reference/office-topdown-concept-v2.png`: a central dodgeball court lane with a center circle, glass meeting room, open desk islands, cafe/lounge area, copy and service nooks, reception counter, lockers, storage carts, team-colored drums/dividers, lighting panels, plants, and clear play lanes.
+- AI-generated low-poly office texture atlas at `public/assets/textures/office-voxel-atlas-20260621.png`, applied to floor tiles, wood, glass, fabric, paper, cardboard, team props, plants, and dodgeballs.
 - Office props react to impacts with impulse, spin, bounce, collision against glass partitions, and paper/confetti bursts.
 - Viewer controls: pause, camera mode, reset, and match speed.
 - Responsive HUD for desktop and mobile browser sizes.
