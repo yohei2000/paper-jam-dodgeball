@@ -168,23 +168,51 @@ type PropOptions = {
 
 const atlasColumns = 4;
 const atlasRows = 5;
+// Vite's base keeps texture URLs valid under GitHub Pages' /paper-jam-dodgeball/ path.
+const textureAtlasUrl = `${import.meta.env.BASE_URL}assets/textures/office-voxel-atlas-20260621.png`;
 const textureLoader = new THREE.TextureLoader();
 
-function configureAtlasTexture(texture: THREE.Texture) {
+let textureAtlasLoaded = false;
+let textureAtlasAppliedCount = 0;
+
+function configureGeneratedTexture(texture: THREE.Texture, repeatX = 1, repeatY = 1) {
   texture.colorSpace = THREE.SRGBColorSpace;
   texture.magFilter = THREE.NearestFilter;
   texture.minFilter = THREE.LinearMipmapLinearFilter;
-  texture.wrapS = THREE.ClampToEdgeWrapping;
-  texture.wrapT = THREE.ClampToEdgeWrapping;
+  texture.wrapS = THREE.RepeatWrapping;
+  texture.wrapT = THREE.RepeatWrapping;
+  texture.repeat.set(repeatX, repeatY);
+  texture.anisotropy = Math.min(8, renderer.capabilities.getMaxAnisotropy());
   return texture;
 }
 
-function atlasTileFrom(source: THREE.Texture, column: number, row: number) {
-  const texture = source.clone();
-  texture.image = source.image;
-  configureAtlasTexture(texture);
-  texture.repeat.set(1 / atlasColumns, 1 / atlasRows);
-  texture.offset.set(column / atlasColumns, 1 - (row + 1) / atlasRows);
+function atlasTileFrom(source: THREE.Texture, column: number, row: number, repeatX = 1, repeatY = 1) {
+  const sourceImage = source.image as CanvasImageSource & { width: number; height: number };
+  const tileWidth = Math.floor(sourceImage.width / atlasColumns);
+  const tileHeight = Math.floor(sourceImage.height / atlasRows);
+  const canvas = document.createElement("canvas");
+  canvas.width = 256;
+  canvas.height = 256;
+  const ctx = canvas.getContext("2d");
+  if (!ctx) throw new Error("Could not create texture canvas");
+
+  ctx.imageSmoothingEnabled = true;
+  ctx.imageSmoothingQuality = "high";
+  ctx.filter = "saturate(1.18) contrast(1.12)";
+  ctx.drawImage(
+    sourceImage,
+    column * tileWidth,
+    row * tileHeight,
+    tileWidth,
+    tileHeight,
+    0,
+    0,
+    canvas.width,
+    canvas.height,
+  );
+
+  const texture = new THREE.CanvasTexture(canvas);
+  configureGeneratedTexture(texture, repeatX, repeatY);
   texture.needsUpdate = true;
   return texture;
 }
@@ -260,48 +288,57 @@ const materials = {
 };
 
 type MaterialKey = keyof typeof materials;
+type AtlasMaterialSlot = {
+  key: MaterialKey;
+  column: number;
+  row: number;
+  repeatX?: number;
+  repeatY?: number;
+};
 
-const atlasMaterialSlots: Array<[MaterialKey, number, number]> = [
-  ["floor", 0, 0],
-  ["floorLine", 1, 0],
-  ["courtBlue", 1, 0],
-  ["courtRed", 1, 0],
-  ["courtLane", 3, 0],
-  ["blueTape", 2, 2],
-  ["redTape", 3, 2],
-  ["safetyOrange", 0, 4],
-  ["carpetTeal", 0, 2],
-  ["carpetPlum", 1, 2],
-  ["receptionStone", 0, 0],
-  ["lockerBlue", 1, 4],
-  ["lockerRed", 2, 4],
-  ["cartGreen", 3, 3],
-  ["warmWall", 3, 4],
-  ["glass", 2, 1],
-  ["wood", 0, 1],
-  ["woodDark", 1, 1],
-  ["metal", 3, 1],
-  ["darkMetal", 2, 3],
-  ["rubber", 2, 3],
-  ["blue", 2, 2],
-  ["blueDark", 1, 4],
-  ["red", 3, 2],
-  ["redDark", 2, 4],
-  ["tealFabric", 0, 2],
-  ["coralFabric", 1, 2],
-  ["leaf", 3, 3],
-  ["paper", 0, 3],
-  ["ball", 0, 4],
+const atlasMaterialSlots: AtlasMaterialSlot[] = [
+  { key: "floor", column: 0, row: 0, repeatX: 9, repeatY: 6 },
+  { key: "floorLine", column: 1, row: 0, repeatX: 2, repeatY: 1 },
+  { key: "courtBlue", column: 1, row: 0, repeatX: 5, repeatY: 5 },
+  { key: "courtRed", column: 1, row: 0, repeatX: 5, repeatY: 5 },
+  { key: "courtLane", column: 3, row: 0, repeatX: 3, repeatY: 5 },
+  { key: "blueTape", column: 2, row: 2, repeatX: 1.5, repeatY: 1 },
+  { key: "redTape", column: 3, row: 2, repeatX: 1.5, repeatY: 1 },
+  { key: "safetyOrange", column: 0, row: 4, repeatX: 1.5, repeatY: 1.5 },
+  { key: "carpetTeal", column: 0, row: 2, repeatX: 4, repeatY: 3 },
+  { key: "carpetPlum", column: 1, row: 2, repeatX: 4, repeatY: 3 },
+  { key: "receptionStone", column: 0, row: 0, repeatX: 2, repeatY: 2 },
+  { key: "lockerBlue", column: 1, row: 4, repeatX: 1, repeatY: 1 },
+  { key: "lockerRed", column: 2, row: 4, repeatX: 1, repeatY: 1 },
+  { key: "cartGreen", column: 3, row: 3, repeatX: 1, repeatY: 1 },
+  { key: "warmWall", column: 3, row: 4, repeatX: 4, repeatY: 1.5 },
+  { key: "glass", column: 2, row: 1, repeatX: 2, repeatY: 1 },
+  { key: "wood", column: 0, row: 1, repeatX: 2.2, repeatY: 1.2 },
+  { key: "woodDark", column: 1, row: 1, repeatX: 2, repeatY: 1 },
+  { key: "metal", column: 3, row: 1, repeatX: 1.4, repeatY: 1.1 },
+  { key: "darkMetal", column: 2, row: 3, repeatX: 1, repeatY: 1 },
+  { key: "rubber", column: 2, row: 3, repeatX: 2, repeatY: 1 },
+  { key: "blue", column: 2, row: 2, repeatX: 1, repeatY: 1 },
+  { key: "blueDark", column: 1, row: 4, repeatX: 1, repeatY: 1 },
+  { key: "red", column: 3, row: 2, repeatX: 1, repeatY: 1 },
+  { key: "redDark", column: 2, row: 4, repeatX: 1, repeatY: 1 },
+  { key: "tealFabric", column: 0, row: 2, repeatX: 1.5, repeatY: 1 },
+  { key: "coralFabric", column: 1, row: 2, repeatX: 1.5, repeatY: 1 },
+  { key: "leaf", column: 3, row: 3, repeatX: 1, repeatY: 1 },
+  { key: "paper", column: 0, row: 3, repeatX: 1, repeatY: 1 },
+  { key: "ball", column: 0, row: 4, repeatX: 1, repeatY: 1 },
 ];
 
 function applyGeneratedTextureAtlas() {
-  textureLoader.load("/assets/textures/office-voxel-atlas-20260621.png", (source) => {
-    configureAtlasTexture(source);
+  textureLoader.load(textureAtlasUrl, (source) => {
+    textureAtlasLoaded = true;
+    textureAtlasAppliedCount = 0;
 
-    for (const [key, column, row] of atlasMaterialSlots) {
+    for (const { key, column, row, repeatX = 1, repeatY = 1 } of atlasMaterialSlots) {
       const material = materials[key];
-      material.map = atlasTileFrom(source, column, row);
+      material.map = atlasTileFrom(source, column, row, repeatX, repeatY);
       material.needsUpdate = true;
+      textureAtlasAppliedCount += 1;
     }
   });
 }
@@ -1510,6 +1547,9 @@ window.__voxelOfficeDodgeball = {
     chaos: Math.round(chaos),
     cameraMode: cameraModes[cameraModeIndex],
     paused,
+    textureAtlasLoaded,
+    textureAtlasAppliedCount,
+    textureAtlasUrl,
     samplePlayers: players.slice(0, 4).map((player) => ({
       team: player.team,
       x: Number(player.group.position.x.toFixed(2)),
