@@ -1,0 +1,44 @@
+<!doctype html>
+<html lang="ja">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Paper Jam Dodgeball</title>
+  </head>
+  <body>
+    <div id="app">
+      <canvas id="game"></canvas>
+      <section class="hud hud-top" aria-label="match status">
+        <div class="brand">
+          <span class="brand-mark"></span>
+          <span>Paper Jam Dodgeball</span>
+        </div>
+        <div class="scoreboard">
+          <div class="score score-blue">
+            <span>Blue</span>
+            <strong id="blueScore">0</strong>
+          </div>
+          <div class="clock" id="clock">02:30</div>
+          <div class="score score-red">
+            <span>Red</span>
+            <strong id="redScore">0</strong>
+          </div>
+        </div>
+        <div class="chaos">
+          <span>Chaos</span>
+          <meter id="chaosMeter" min="0" max="100" value="0"></meter>
+        </div>
+      </section>
+      <section class="hud hud-bottom" aria-label="match controls">
+        <button id="pauseButton" type="button" aria-pressed="false">Pause</button>
+        <button id="cameraButton" type="button">Camera</button>
+        <button id="resetButton" type="button">Reset</button>
+        <label class="speed-control">
+          <span>Speed</span>
+          <input id="speedSlider" type="range" min="0.65" max="1.55" value="1" step="0.05" />
+        </label>
+      </section>
+    </div>
+    <script type="module" src="/src/main.js"></script>
+  </body>
+</html>

@@ -1,0 +1,8 @@
+node_modules/
+dist/
+.vite-cache/
+vite-dev*.log
+vite-dev*.err
+vite-direct*.log
+vite-direct*.err
+verification-screenshots/
