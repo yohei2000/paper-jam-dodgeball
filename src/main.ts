@@ -368,6 +368,10 @@ function pick(list) {
   return list[Math.floor(Math.random() * list.length)];
 }
 
+function clampComponent(value: number, limit: number) {
+  return clamp(value, -limit, limit);
+}
+
 function clamp(value, min, max) {
   return Math.max(min, Math.min(max, value));
 }
@@ -498,6 +502,7 @@ function addProp(kind, x, z, sx, sy, sz, material, mass = 1, options: PropOption
     velocity: new THREE.Vector3(),
     spin: new THREE.Vector3(),
     air: false,
+    impactCooldown: 0,
     health: 1,
   };
   props.push(prop);
@@ -524,6 +529,7 @@ function addCylinderProp(kind, x, z, radius, height, material, mass = 1, options
     velocity: new THREE.Vector3(),
     spin: new THREE.Vector3(),
     air: false,
+    impactCooldown: 0,
     health: 1,
   };
   props.push(prop);
@@ -1087,7 +1093,7 @@ function throwBall(player, ball, target) {
   ball.age = 0;
   ball.mesh.position.set(from.x, 1.35, from.z);
   ball.velocity.set((dx + leadX) * inv * speed, 3.55 + rand(0.25, 1.35), (dz + leadZ) * inv * speed);
-  ball.spin.set(rand(-16, 16), rand(-16, 16), rand(-16, 16));
+  ball.spin.set(rand(-7, 7), rand(-9, 9), rand(-7, 7));
   player.cooldown = rand(0.78, 1.35);
   player.lean = player.team === "blue" ? -0.28 : 0.28;
 }
@@ -1128,15 +1134,47 @@ function hitPlayer(player, ball) {
   resetBall(ball);
 }
 
+function isFlutterProp(prop) {
+  return (
+    prop.kind.includes("paper") ||
+    prop.kind.includes("note") ||
+    prop.kind.includes("magazine") ||
+    prop.kind.includes("leaf")
+  );
+}
+
+function isSmallLooseProp(prop) {
+  return isFlutterProp(prop) || prop.kind.includes("cup") || prop.kind.includes("binder") || prop.kind.includes("cable");
+}
+
 function kickProp(prop, impulse, sourcePosition) {
+  if (prop.impactCooldown > 0) return;
+
   const strength = impulse.length();
-  prop.velocity.x += impulse.x / prop.mass;
-  prop.velocity.z += impulse.z / prop.mass;
-  prop.velocity.y += Math.min(7.8, 1.15 + strength * 0.092) / prop.mass;
-  prop.spin.x += rand(-3.8, 3.8) + impulse.z * 0.18;
-  prop.spin.y += rand(-6.2, 6.2);
-  prop.spin.z += rand(-3.8, 3.8) - impulse.x * 0.18;
-  prop.air = true;
+  const flutter = isFlutterProp(prop);
+  const loose = isSmallLooseProp(prop);
+  const invMass = 1 / Math.max(0.72, prop.mass);
+  const slideLimit = flutter ? 6.4 : loose ? 5.2 : prop.mass > 2 ? 2.6 : 4.1;
+  const slideScale = flutter ? 0.34 : loose ? 0.42 : 0.36;
+
+  prop.velocity.x = clampComponent(prop.velocity.x + impulse.x * invMass * slideScale, slideLimit);
+  prop.velocity.z = clampComponent(prop.velocity.z + impulse.z * invMass * slideScale, slideLimit);
+
+  const lift =
+    flutter
+      ? clamp(0.42 + strength * 0.045, 0.35, 1.95)
+      : loose
+        ? clamp(0.18 + strength * 0.022, 0.12, 0.72)
+        : clamp(strength * 0.008, 0, prop.mass > 1.8 ? 0.16 : 0.34);
+  prop.velocity.y = Math.max(prop.velocity.y, lift);
+
+  const yawKick = clampComponent((impulse.x - impulse.z) * 0.045 + rand(-0.85, 0.85), flutter ? 2.2 : 1.45);
+  prop.spin.y = clampComponent(prop.spin.y + yawKick, flutter ? 2.8 : 1.8);
+  prop.spin.x = clampComponent(prop.spin.x + rand(-0.55, 0.55) + impulse.z * 0.025, flutter ? 2.8 : 0.72);
+  prop.spin.z = clampComponent(prop.spin.z + rand(-0.55, 0.55) - impulse.x * 0.025, flutter ? 2.8 : 0.72);
+
+  prop.air = prop.velocity.y > 0.16;
+  prop.impactCooldown = flutter ? 0.08 : 0.18;
   prop.health -= 0.25;
   chaos = clamp(chaos + (prop.kind.includes("paper") || prop.kind.includes("note") ? 1 : 3), 0, 100);
 
@@ -1273,6 +1311,7 @@ function updateBalls(dt) {
     ball.mesh.rotation.x += ball.spin.x * dt;
     ball.mesh.rotation.y += ball.spin.y * dt;
     ball.mesh.rotation.z += ball.spin.z * dt;
+    ball.spin.multiplyScalar(Math.pow(0.78, dt));
 
     if (Math.abs(ball.mesh.position.x) > ARENA.halfW - 0.36) {
       ball.mesh.position.x = clamp(ball.mesh.position.x, -ARENA.halfW + 0.36, ARENA.halfW - 0.36);
@@ -1306,6 +1345,7 @@ function updateBalls(dt) {
       ball.velocity.y *= -0.46;
       ball.velocity.x *= 0.78;
       ball.velocity.z *= 0.78;
+      ball.spin.multiplyScalar(0.72);
       if (ball.velocity.length() < 3.2 || ball.age > 2.7) {
         ball.airborne = false;
         ball.team = null;
@@ -1343,24 +1383,45 @@ function updateBalls(dt) {
 
 function updateProps(dt) {
   for (const prop of props) {
-    prop.velocity.y -= 10.8 * dt;
-    prop.mesh.position.addScaledVector(prop.velocity, dt);
-    prop.mesh.rotation.x += prop.spin.x * dt;
-    prop.mesh.rotation.y += prop.spin.y * dt;
-    prop.mesh.rotation.z += prop.spin.z * dt;
+    prop.impactCooldown = Math.max(0, prop.impactCooldown - dt);
+
+    const flutter = isFlutterProp(prop);
+    const airborne = prop.air || prop.mesh.position.y > prop.baseY + 0.015 || Math.abs(prop.velocity.y) > 0.02;
+
+    if (airborne) {
+      prop.velocity.y -= (flutter ? 7.2 : 13.4) * dt;
+      prop.velocity.x *= Math.pow(flutter ? 0.965 : 0.94, dt);
+      prop.velocity.z *= Math.pow(flutter ? 0.965 : 0.94, dt);
+    } else {
+      prop.mesh.position.y = prop.baseY;
+      prop.velocity.y = 0;
+      prop.velocity.x *= Math.pow(0.09, dt);
+      prop.velocity.z *= Math.pow(0.09, dt);
+    }
+
+    prop.mesh.position.x += prop.velocity.x * dt;
+    prop.mesh.position.y += prop.velocity.y * dt;
+    prop.mesh.position.z += prop.velocity.z * dt;
+
+    const spinScale = airborne && !flutter ? 0.22 : 1;
+    prop.mesh.rotation.x += prop.spin.x * dt * spinScale;
+    prop.mesh.rotation.y += prop.spin.y * dt * (airborne && !flutter ? 0.55 : 1);
+    prop.mesh.rotation.z += prop.spin.z * dt * spinScale;
 
     if (prop.mesh.position.y < prop.baseY) {
       prop.mesh.position.y = prop.baseY;
-      if (prop.air && Math.abs(prop.velocity.y) > 1.1) {
+      if (prop.air && Math.abs(prop.velocity.y) > (flutter ? 1.6 : 2.6)) {
         spawnPaperBurst(prop.mesh.position, prop.kind.includes("paper") ? 1 : 4, prop.velocity, true);
       }
-      prop.velocity.y *= -0.24;
-      prop.velocity.x *= 0.82;
-      prop.velocity.z *= 0.82;
-      prop.spin.multiplyScalar(0.82);
-      if (prop.velocity.length() < 0.22) {
+      prop.velocity.y = flutter && Math.abs(prop.velocity.y) > 2.8 ? Math.abs(prop.velocity.y) * 0.08 : 0;
+      prop.velocity.x *= flutter ? 0.74 : 0.54;
+      prop.velocity.z *= flutter ? 0.74 : 0.54;
+      prop.spin.x *= flutter ? 0.42 : 0.16;
+      prop.spin.y *= flutter ? 0.62 : 0.38;
+      prop.spin.z *= flutter ? 0.42 : 0.16;
+      if (length2(prop.velocity.x, prop.velocity.z) < 0.22 && Math.abs(prop.velocity.y) < 0.03) {
         prop.velocity.set(0, 0, 0);
-        prop.spin.multiplyScalar(0.5);
+        prop.spin.multiplyScalar(0.35);
         prop.air = false;
       }
     }
@@ -1377,15 +1438,34 @@ function updateProps(dt) {
         prop.velocity.z -= dot * hit.nz * 1.45;
       }
       prop.velocity.multiplyScalar(0.72);
+      prop.spin.multiplyScalar(0.55);
     }
 
     if (Math.abs(prop.mesh.position.x) > ARENA.halfW - 0.45) {
       prop.mesh.position.x = clamp(prop.mesh.position.x, -ARENA.halfW + 0.45, ARENA.halfW - 0.45);
       prop.velocity.x *= -0.42;
+      prop.spin.multiplyScalar(0.55);
     }
     if (Math.abs(prop.mesh.position.z) > ARENA.halfD - 0.45) {
       prop.mesh.position.z = clamp(prop.mesh.position.z, -ARENA.halfD + 0.45, ARENA.halfD - 0.45);
       prop.velocity.z *= -0.42;
+      prop.spin.multiplyScalar(0.55);
+    }
+
+    if (prop.mesh.position.y <= prop.baseY + 0.001) {
+      prop.mesh.rotation.x = THREE.MathUtils.lerp(prop.mesh.rotation.x, prop.homeRotation.x, flutter ? 0.035 : 0.18);
+      prop.mesh.rotation.z = THREE.MathUtils.lerp(prop.mesh.rotation.z, prop.homeRotation.z, flutter ? 0.035 : 0.18);
+      prop.spin.x *= Math.pow(0.02, dt);
+      prop.spin.y *= Math.pow(0.06, dt);
+      prop.spin.z *= Math.pow(0.02, dt);
+
+      if (length2(prop.velocity.x, prop.velocity.z) < 0.035) {
+        prop.velocity.x = 0;
+        prop.velocity.z = 0;
+      }
+      if (prop.spin.length() < 0.035) {
+        prop.spin.set(0, 0, 0);
+      }
     }
   }
 }
