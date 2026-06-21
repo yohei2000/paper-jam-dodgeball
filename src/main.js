@@ -11,88 +11,197 @@ const cameraButton = document.querySelector("#cameraButton");
 const resetButton = document.querySelector("#resetButton");
 const speedSlider = document.querySelector("#speedSlider");
 
-const ARENA = { width: 34, depth: 22, halfW: 17, halfD: 11 };
+const ARENA = { width: 38, depth: 24, halfW: 19, halfD: 12 };
 const MATCH_LENGTH = 150;
 const PLAYER_COUNT = 5;
-const BALL_COUNT = 5;
+const BALL_COUNT = 6;
 const cameraModes = ["iso", "top", "sideline"];
 
 const palette = {
   blue: 0x0ea5e9,
-  blueDark: 0x0369a1,
+  blueDark: 0x075985,
   red: 0xf43f5e,
   redDark: 0xbe123c,
-  floor: 0xe7eef3,
-  floorLine: 0xc8d3dc,
-  glass: 0xb7d9ee,
-  wood: 0xb98b5e,
-  metal: 0x94a3b8,
-  leaf: 0x16a34a,
-  paper: 0xffffff,
+  floor: 0xe8eef2,
+  floorLine: 0xc7d4df,
+  glass: 0xadd7ec,
+  glassEdge: 0x7aa5b8,
+  warmWall: 0xf7f2e8,
+  wood: 0xb98252,
+  woodDark: 0x7f5635,
+  metal: 0x9aa8b8,
+  darkMetal: 0x202938,
+  tealFabric: 0x148f88,
+  coralFabric: 0xef7c63,
+  yellow: 0xfacc15,
+  leaf: 0x1f9d55,
+  paper: 0xfffbf0,
+  stickyBlue: 0x93c5fd,
+  stickyPink: 0xf9a8d4,
   ball: 0xf97316,
   ink: 0x172033,
 };
 
 const scene = new THREE.Scene();
-scene.background = new THREE.Color(0xdde8ef);
-scene.fog = new THREE.Fog(0xdde8ef, 38, 74);
+scene.background = new THREE.Color(0xdce7ee);
+scene.fog = new THREE.Fog(0xdce7ee, 42, 86);
 
 const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
 renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
 renderer.shadowMap.enabled = true;
 renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+renderer.outputColorSpace = THREE.SRGBColorSpace;
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+renderer.toneMappingExposure = 1.06;
 
-const camera = new THREE.OrthographicCamera(-18, 18, 10, -10, 0.1, 120);
+const camera = new THREE.OrthographicCamera(-18, 18, 10, -10, 0.1, 140);
 scene.add(camera);
 
-const ambient = new THREE.HemisphereLight(0xf8fbff, 0x78909c, 2.45);
+const ambient = new THREE.HemisphereLight(0xffffff, 0x7b8794, 2.2);
 scene.add(ambient);
 
-const sun = new THREE.DirectionalLight(0xffffff, 2.1);
-sun.position.set(-12, 22, 14);
+const sun = new THREE.DirectionalLight(0xffffff, 2.35);
+sun.position.set(-14, 25, 18);
 sun.castShadow = true;
 sun.shadow.mapSize.set(2048, 2048);
-sun.shadow.camera.left = -26;
-sun.shadow.camera.right = 26;
-sun.shadow.camera.top = 22;
-sun.shadow.camera.bottom = -22;
+sun.shadow.camera.left = -28;
+sun.shadow.camera.right = 28;
+sun.shadow.camera.top = 24;
+sun.shadow.camera.bottom = -24;
 scene.add(sun);
+
+for (const light of [
+  [-12, -6, 1.15],
+  [0, 0, 1.35],
+  [12, 6, 1.15],
+]) {
+  const point = new THREE.PointLight(0xffffff, light[2], 28, 1.8);
+  point.position.set(light[0], 5.8, light[1]);
+  scene.add(point);
+}
+
+const officeGroup = new THREE.Group();
+scene.add(officeGroup);
 
 const shared = {
   cube: new THREE.BoxGeometry(1, 1, 1),
-  ball: new THREE.IcosahedronGeometry(0.38, 1),
+  ball: new THREE.IcosahedronGeometry(0.38, 2),
   dust: new THREE.BoxGeometry(0.14, 0.04, 0.1),
-  player: new THREE.BoxGeometry(0.92, 1.3, 0.92),
+  playerBody: new THREE.BoxGeometry(0.9, 1.18, 0.72),
+  playerHead: new THREE.BoxGeometry(0.6, 0.46, 0.58),
+  cylinder: new THREE.CylinderGeometry(0.5, 0.5, 1, 14),
+  cone: new THREE.ConeGeometry(0.46, 0.8, 5),
+  torus: new THREE.TorusGeometry(0.34, 0.035, 6, 24),
+  shadow: new THREE.CircleGeometry(0.72, 24),
 };
 
+function makeTileTexture() {
+  const textureCanvas = document.createElement("canvas");
+  textureCanvas.width = 512;
+  textureCanvas.height = 512;
+  const ctx = textureCanvas.getContext("2d");
+  ctx.fillStyle = "#e8eef2";
+  ctx.fillRect(0, 0, 512, 512);
+
+  for (let y = 0; y <= 512; y += 64) {
+    ctx.strokeStyle = "rgba(126, 148, 164, 0.26)";
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.moveTo(0, y + 0.5);
+    ctx.lineTo(512, y + 0.5);
+    ctx.stroke();
+  }
+
+  for (let x = 0; x <= 512; x += 64) {
+    ctx.strokeStyle = "rgba(126, 148, 164, 0.22)";
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.moveTo(x + 0.5, 0);
+    ctx.lineTo(x + 0.5, 512);
+    ctx.stroke();
+  }
+
+  for (let i = 0; i < 900; i += 1) {
+    const alpha = Math.random() * 0.045;
+    ctx.fillStyle = `rgba(255, 255, 255, ${alpha})`;
+    ctx.fillRect(Math.random() * 512, Math.random() * 512, 1.4, 1.4);
+  }
+
+  const texture = new THREE.CanvasTexture(textureCanvas);
+  texture.wrapS = THREE.RepeatWrapping;
+  texture.wrapT = THREE.RepeatWrapping;
+  texture.repeat.set(6, 4);
+  texture.colorSpace = THREE.SRGBColorSpace;
+  return texture;
+}
+
+function mat(color, options = {}) {
+  const params = {
+    color,
+    roughness: options.roughness ?? 0.68,
+    metalness: options.metalness ?? 0,
+    emissive: options.emissive ?? 0x000000,
+    emissiveIntensity: options.emissiveIntensity ?? 0,
+    transparent: options.transparent ?? false,
+    opacity: options.opacity ?? 1,
+  };
+
+  if (options.map) {
+    params.map = options.map;
+  }
+
+  return new THREE.MeshStandardMaterial(params);
+}
+
 const materials = {
-  blue: new THREE.MeshStandardMaterial({ color: palette.blue, roughness: 0.72 }),
-  blueDark: new THREE.MeshStandardMaterial({ color: palette.blueDark, roughness: 0.8 }),
-  red: new THREE.MeshStandardMaterial({ color: palette.red, roughness: 0.72 }),
-  redDark: new THREE.MeshStandardMaterial({ color: palette.redDark, roughness: 0.8 }),
-  floor: new THREE.MeshStandardMaterial({ color: palette.floor, roughness: 0.62 }),
-  floorLine: new THREE.MeshStandardMaterial({ color: palette.floorLine, roughness: 0.7 }),
+  floor: mat(0xffffff, { map: makeTileTexture(), roughness: 0.58 }),
+  floorLine: mat(palette.floorLine, { roughness: 0.72 }),
+  courtBlue: mat(0xcfe7f6, { roughness: 0.78 }),
+  courtRed: mat(0xf4d7d4, { roughness: 0.78 }),
+  carpetTeal: mat(0x6ab4aa, { roughness: 0.88 }),
+  carpetPlum: mat(0xa77aa7, { roughness: 0.86 }),
+  warmWall: mat(palette.warmWall, { roughness: 0.7 }),
+  wallTrim: mat(0xd6c3ad, { roughness: 0.6 }),
   glass: new THREE.MeshPhysicalMaterial({
     color: palette.glass,
-    roughness: 0.16,
-    transmission: 0.18,
+    roughness: 0.08,
+    metalness: 0,
+    transmission: 0.26,
     transparent: true,
-    opacity: 0.34,
+    opacity: 0.42,
+    ior: 1.25,
   }),
-  wood: new THREE.MeshStandardMaterial({ color: palette.wood, roughness: 0.76 }),
-  metal: new THREE.MeshStandardMaterial({ color: palette.metal, roughness: 0.44, metalness: 0.2 }),
-  ink: new THREE.MeshStandardMaterial({ color: palette.ink, roughness: 0.58 }),
-  leaf: new THREE.MeshStandardMaterial({ color: palette.leaf, roughness: 0.86 }),
-  paper: new THREE.MeshStandardMaterial({ color: palette.paper, roughness: 0.92 }),
-  ball: new THREE.MeshStandardMaterial({ color: palette.ball, roughness: 0.45 }),
-  shadow: new THREE.MeshBasicMaterial({ color: 0x0f172a, transparent: true, opacity: 0.1 }),
+  glassEdge: mat(palette.glassEdge, { roughness: 0.34, metalness: 0.16 }),
+  wood: mat(palette.wood, { roughness: 0.62 }),
+  woodDark: mat(palette.woodDark, { roughness: 0.64 }),
+  metal: mat(palette.metal, { roughness: 0.38, metalness: 0.26 }),
+  darkMetal: mat(palette.darkMetal, { roughness: 0.48, metalness: 0.18 }),
+  rubber: mat(0x313948, { roughness: 0.74 }),
+  blue: mat(palette.blue, { roughness: 0.64 }),
+  blueDark: mat(palette.blueDark, { roughness: 0.7 }),
+  red: mat(palette.red, { roughness: 0.64 }),
+  redDark: mat(palette.redDark, { roughness: 0.7 }),
+  tealFabric: mat(palette.tealFabric, { roughness: 0.9 }),
+  coralFabric: mat(palette.coralFabric, { roughness: 0.88 }),
+  yellow: mat(palette.yellow, { roughness: 0.7 }),
+  leaf: mat(palette.leaf, { roughness: 0.86 }),
+  pot: mat(0x9a6b43, { roughness: 0.78 }),
+  paper: mat(palette.paper, { roughness: 0.94 }),
+  stickyBlue: mat(palette.stickyBlue, { roughness: 0.9 }),
+  stickyPink: mat(palette.stickyPink, { roughness: 0.9 }),
+  ball: mat(palette.ball, { roughness: 0.38 }),
+  ballStripe: mat(0xfff1c2, { roughness: 0.42 }),
+  ink: mat(palette.ink, { roughness: 0.54 }),
+  screen: mat(0x082f49, { roughness: 0.26, emissive: 0x0ea5e9, emissiveIntensity: 0.16 }),
+  lightPanel: mat(0xfff7da, { roughness: 0.18, emissive: 0xfff0b3, emissiveIntensity: 1.15 }),
+  shadow: new THREE.MeshBasicMaterial({ color: 0x0f172a, transparent: true, opacity: 0.12 }),
 };
 
 const players = [];
 const balls = [];
 const props = [];
 const particles = [];
-const walls = [];
+const barriers = [];
 
 let gameTime = MATCH_LENGTH;
 let blueScore = 0;
@@ -107,6 +216,10 @@ function rand(min, max) {
   return min + Math.random() * (max - min);
 }
 
+function pick(list) {
+  return list[Math.floor(Math.random() * list.length)];
+}
+
 function clamp(value, min, max) {
   return Math.max(min, Math.min(max, value));
 }
@@ -115,94 +228,108 @@ function length2(x, z) {
   return Math.sqrt(x * x + z * z);
 }
 
-function makeBox({ size, position, material, cast = true, receive = true }) {
+function makeBox({ size, position, material, cast = true, receive = true, parent = scene, rotationY = 0 }) {
   const mesh = new THREE.Mesh(shared.cube, material);
   mesh.scale.set(size.x, size.y, size.z);
   mesh.position.set(position.x, position.y, position.z);
+  mesh.rotation.y = rotationY;
   mesh.castShadow = cast;
   mesh.receiveShadow = receive;
-  scene.add(mesh);
+  parent.add(mesh);
   return mesh;
 }
 
-function buildOffice() {
-  const floor = makeBox({
-    size: { x: ARENA.width, y: 0.16, z: ARENA.depth },
-    position: { x: 0, y: -0.08, z: 0 },
-    material: materials.floor,
-    cast: false,
-  });
-  floor.receiveShadow = true;
-
-  for (let x = -ARENA.halfW; x <= ARENA.halfW; x += 2) {
-    makeBox({
-      size: { x: 0.035, y: 0.022, z: ARENA.depth },
-      position: { x, y: 0.02, z: 0 },
-      material: materials.floorLine,
-      cast: false,
-    });
-  }
-
-  for (let z = -ARENA.halfD; z <= ARENA.halfD; z += 2) {
-    makeBox({
-      size: { x: ARENA.width, y: 0.024, z: 0.035 },
-      position: { x: 0, y: 0.03, z },
-      material: materials.floorLine,
-      cast: false,
-    });
-  }
-
-  makeBox({
-    size: { x: 0.14, y: 0.04, z: ARENA.depth },
-    position: { x: 0, y: 0.065, z: 0 },
-    material: new THREE.MeshStandardMaterial({ color: 0xf97316, roughness: 0.7 }),
-    cast: false,
-  });
-
-  const wallData = [
-    { x: 0, z: -ARENA.halfD - 0.36, sx: ARENA.width + 1.2, sz: 0.22 },
-    { x: 0, z: ARENA.halfD + 0.36, sx: ARENA.width + 1.2, sz: 0.22 },
-    { x: -ARENA.halfW - 0.36, z: 0, sx: 0.22, sz: ARENA.depth + 1.2 },
-    { x: ARENA.halfW + 0.36, z: 0, sx: 0.22, sz: ARENA.depth + 1.2 },
-  ];
-
-  for (const wall of wallData) {
-    walls.push(
-      makeBox({
-        size: { x: wall.sx, y: 2.6, z: wall.sz },
-        position: { x: wall.x, y: 1.3, z: wall.z },
-        material: materials.glass,
-        cast: false,
-        receive: false,
-      }),
-    );
-  }
-
-  for (let x = -14; x <= 14; x += 7) {
-    makeBox({
-      size: { x: 1.1, y: 0.08, z: 0.1 },
-      position: { x, y: 3.1, z: -ARENA.halfD - 0.48 },
-      material: materials.ink,
-      cast: false,
-      receive: false,
-    });
-  }
+function makeCylinder({ radius = 0.5, height = 1, position, material, cast = true, receive = true, parent = scene }) {
+  const mesh = new THREE.Mesh(shared.cylinder, material);
+  mesh.scale.set(radius, height, radius);
+  mesh.position.set(position.x, position.y, position.z);
+  mesh.castShadow = cast;
+  mesh.receiveShadow = receive;
+  parent.add(mesh);
+  return mesh;
 }
 
-function addProp(kind, x, z, sx, sy, sz, material, mass = 1) {
+function addBarrierBox({ x, z, sx, sz, height, y = 0, material, visualHeight = height }) {
+  const mesh = makeBox({
+    size: { x: sx, y: visualHeight, z: sz },
+    position: { x, y: y + visualHeight / 2, z },
+    material,
+    parent: officeGroup,
+  });
+
+  barriers.push({
+    mesh,
+    minX: x - sx / 2,
+    maxX: x + sx / 2,
+    minZ: z - sz / 2,
+    maxZ: z + sz / 2,
+    height: y + height,
+  });
+  return mesh;
+}
+
+function circleRectPenetration(x, z, radius, rect) {
+  const closestX = clamp(x, rect.minX, rect.maxX);
+  const closestZ = clamp(z, rect.minZ, rect.maxZ);
+  let dx = x - closestX;
+  let dz = z - closestZ;
+  const distSq = dx * dx + dz * dz;
+
+  if (distSq >= radius * radius) return null;
+
+  if (distSq < 0.0001) {
+    const left = Math.abs(x - rect.minX);
+    const right = Math.abs(rect.maxX - x);
+    const top = Math.abs(z - rect.minZ);
+    const bottom = Math.abs(rect.maxZ - z);
+    const side = Math.min(left, right, top, bottom);
+    if (side === left) return { nx: -1, nz: 0, penetration: radius + left };
+    if (side === right) return { nx: 1, nz: 0, penetration: radius + right };
+    if (side === top) return { nx: 0, nz: -1, penetration: radius + top };
+    return { nx: 0, nz: 1, penetration: radius + bottom };
+  }
+
+  const dist = Math.sqrt(distSq);
+  dx /= dist;
+  dz /= dist;
+  return { nx: dx, nz: dz, penetration: radius - dist };
+}
+
+function isBlockedPoint(x, z, pad = 0.75) {
+  return barriers.some(
+    (barrier) =>
+      x > barrier.minX - pad &&
+      x < barrier.maxX + pad &&
+      z > barrier.minZ - pad &&
+      z < barrier.maxZ + pad,
+  );
+}
+
+function addFloorInset(x, z, sx, sz, material, y = 0.022) {
+  makeBox({
+    size: { x: sx, y: 0.035, z: sz },
+    position: { x, y, z },
+    material,
+    cast: false,
+    parent: officeGroup,
+  });
+}
+
+function addProp(kind, x, z, sx, sy, sz, material, mass = 1, options = {}) {
   const mesh = makeBox({
     size: { x: sx, y: sy, z: sz },
-    position: { x, y: sy / 2, z },
+    position: { x, y: options.y ?? sy / 2, z },
     material,
+    rotationY: options.rotationY ?? 0,
   });
 
   const prop = {
     kind,
     mesh,
-    baseY: sy / 2,
+    baseY: mesh.position.y,
     homePosition: mesh.position.clone(),
     homeRotation: mesh.rotation.clone(),
-    radius: Math.max(sx, sz) * 0.64,
+    radius: options.radius ?? Math.max(sx, sz) * 0.64,
     mass,
     velocity: new THREE.Vector3(),
     spin: new THREE.Vector3(),
@@ -213,58 +340,229 @@ function addProp(kind, x, z, sx, sy, sz, material, mass = 1) {
   return prop;
 }
 
-function addDeskCluster(x, z, direction) {
-  addProp("desk", x, z, 2.7, 0.42, 1.35, materials.wood, 2.4);
-  addProp("monitor", x - 0.62 * direction, z - 0.18, 0.56, 0.52, 0.16, materials.ink, 0.7);
-  addProp("keyboard", x - 0.38 * direction, z + 0.34, 0.86, 0.08, 0.22, materials.metal, 0.45);
-  addProp("chair", x + 1.45 * direction, z, 0.72, 0.72, 0.72, materials.metal, 0.9);
+function addStaticDetail(x, y, z, sx, sy, sz, material, parent = officeGroup) {
+  return makeBox({
+    size: { x: sx, y: sy, z: sz },
+    position: { x, y, z },
+    material,
+    parent,
+  });
 }
 
-function addPlant(x, z) {
-  addProp("planter", x, z, 0.66, 0.62, 0.66, materials.wood, 1.4);
-  const stem = addProp("plant", x, z, 0.2, 1.1, 0.2, materials.leaf, 0.7);
-  stem.mesh.position.y = 1.16;
-  stem.baseY = 1.16;
-  for (const offset of [
-    [-0.25, 0.15],
-    [0.26, -0.18],
-    [0.18, 0.24],
-  ]) {
-    const leaf = addProp("leaf", x + offset[0], z + offset[1], 0.44, 0.3, 0.44, materials.leaf, 0.35);
-    leaf.mesh.position.y = 1.76 + rand(-0.1, 0.15);
-    leaf.baseY = leaf.mesh.position.y;
+function addGlassPanel(x, z, sx, sz, height = 2.55) {
+  addBarrierBox({ x, z, sx, sz, height, material: materials.glass, visualHeight: height });
+  if (sx > sz) {
+    for (let i = -sx / 2; i <= sx / 2; i += 1.8) {
+      addStaticDetail(x + i, height / 2, z, 0.055, height + 0.08, 0.1, materials.glassEdge);
+    }
+  } else {
+    for (let i = -sz / 2; i <= sz / 2; i += 1.8) {
+      addStaticDetail(x, height / 2, z + i, 0.1, height + 0.08, 0.055, materials.glassEdge);
+    }
   }
 }
 
-function buildProps() {
-  for (const rowZ of [-6.5, -2.2, 2.2, 6.5]) {
-    addDeskCluster(-10.5, rowZ, -1);
-    addDeskCluster(10.5, rowZ, 1);
+function addCeilingLight(x, z, sx, sz) {
+  addStaticDetail(x, 4.65, z, sx, 0.08, sz, materials.lightPanel);
+  addStaticDetail(x, 4.58, z, sx + 0.16, 0.05, 0.05, materials.glassEdge);
+  addStaticDetail(x, 4.58, z - sz / 2, sx + 0.16, 0.05, 0.05, materials.glassEdge);
+  addStaticDetail(x, 4.58, z + sz / 2, sx + 0.16, 0.05, 0.05, materials.glassEdge);
+}
+
+function buildOfficeShell() {
+  makeBox({
+    size: { x: ARENA.width, y: 0.16, z: ARENA.depth },
+    position: { x: 0, y: -0.08, z: 0 },
+    material: materials.floor,
+    cast: false,
+    parent: officeGroup,
+  });
+
+  addFloorInset(-9.5, 0, 17, 21.4, materials.courtBlue);
+  addFloorInset(9.5, 0, 17, 21.4, materials.courtRed);
+  addFloorInset(-13.2, 7.7, 8.4, 5.4, materials.carpetTeal);
+  addFloorInset(13.3, -7.6, 7.4, 5.2, materials.carpetPlum);
+
+  for (let z = -8; z <= 8; z += 4) {
+    addStaticDetail(0, 0.06, z, 0.12, 0.045, 2.3, materials.ballStripe);
+  }
+
+  for (const z of [-10.7, 10.7]) {
+    addStaticDetail(0, 0.12, z, ARENA.width + 0.8, 0.24, 0.28, materials.wallTrim);
+    addStaticDetail(0, 1.45, z + Math.sign(z) * 0.22, ARENA.width + 0.4, 2.6, 0.2, materials.warmWall);
+  }
+
+  for (const x of [-18.9, 18.9]) {
+    addStaticDetail(x, 0.12, 0, 0.28, 0.24, ARENA.depth + 0.8, materials.wallTrim);
+    addStaticDetail(x + Math.sign(x) * 0.22, 1.45, 0, 0.2, 2.6, ARENA.depth + 0.4, materials.warmWall);
+  }
+
+  for (let x = -15; x <= 15; x += 5) {
+    addStaticDetail(x, 2.15, -10.72, 2.3, 0.84, 0.08, materials.glass);
+    addStaticDetail(x, 2.15, 10.72, 2.3, 0.84, 0.08, materials.glass);
+  }
+
+  for (const [x, z, sx, sz] of [
+    [-12, -5.8, 4.2, 1.05],
+    [0, -0.6, 5.3, 1.15],
+    [12, 5.4, 4.2, 1.05],
+  ]) {
+    addCeilingLight(x, z, sx, sz);
+  }
+}
+
+function buildMeetingRoom() {
+  addFloorInset(-12.6, -6.6, 9.2, 6.2, mat(0xdbe8ed, { roughness: 0.64 }));
+  addGlassPanel(-12.6, -9.45, 9.4, 0.18);
+  addGlassPanel(-17.2, -6.55, 0.18, 5.8);
+  addGlassPanel(-8.05, -6.55, 0.18, 5.8);
+  addGlassPanel(-15.4, -3.72, 3.5, 0.18);
+  addGlassPanel(-9.5, -3.72, 2.7, 0.18);
+
+  addStaticDetail(-12.6, 0.08, -3.5, 1.4, 0.08, 0.22, materials.glassEdge);
+  addProp("conference-table", -12.6, -6.55, 4.3, 0.42, 1.55, materials.woodDark, 3.3);
+
+  for (const [x, z, rot] of [
+    [-14.5, -7.85, Math.PI / 2],
+    [-12.6, -7.9, Math.PI / 2],
+    [-10.7, -7.85, Math.PI / 2],
+    [-14.5, -5.25, -Math.PI / 2],
+    [-12.6, -5.2, -Math.PI / 2],
+    [-10.7, -5.25, -Math.PI / 2],
+  ]) {
+    addProp("meeting-chair", x, z, 0.7, 0.58, 0.68, materials.tealFabric, 0.92, { rotationY: rot });
+  }
+
+  addProp("whiteboard", -12.4, -9.12, 2.6, 1.2, 0.12, materials.paper, 1.2, { y: 1.38 });
+  for (let i = 0; i < 8; i += 1) {
+    addProp(
+      "sticky-note",
+      -13.35 + (i % 4) * 0.45,
+      -8.96,
+      0.25,
+      0.03,
+      0.2,
+      i % 2 ? materials.stickyPink : materials.stickyBlue,
+      0.08,
+      { y: 1.95 - Math.floor(i / 4) * 0.34 },
+    );
+  }
+}
+
+function addDeskIsland(x, z, side) {
+  addProp("desk", x, z, 3.0, 0.42, 1.35, materials.wood, 2.45);
+  addStaticDetail(x - 1.23, 0.35, z - 0.48, 0.12, 0.62, 0.12, materials.darkMetal);
+  addStaticDetail(x + 1.23, 0.35, z - 0.48, 0.12, 0.62, 0.12, materials.darkMetal);
+  addStaticDetail(x - 1.23, 0.35, z + 0.48, 0.12, 0.62, 0.12, materials.darkMetal);
+  addStaticDetail(x + 1.23, 0.35, z + 0.48, 0.12, 0.62, 0.12, materials.darkMetal);
+
+  addProp("monitor", x - 0.62 * side, z - 0.23, 0.66, 0.52, 0.13, materials.screen, 0.62, { y: 0.9 });
+  addProp("keyboard", x - 0.32 * side, z + 0.35, 0.84, 0.08, 0.23, materials.darkMetal, 0.38, { y: 0.68 });
+  addProp("laptop", x + 0.62 * side, z + 0.05, 0.72, 0.08, 0.5, materials.ink, 0.48, { y: 0.68 });
+  addProp("chair", x + 1.55 * side, z, 0.72, 0.72, 0.72, side < 0 ? materials.blueDark : materials.redDark, 0.9);
+  addProp("paper-stack", x + 0.1, z - 0.44, 0.48, 0.13, 0.34, materials.paper, 0.22, { y: 0.72 });
+  addProp("coffee-cup", x + 1.08 * side, z - 0.38, 0.22, 0.32, 0.22, materials.yellow, 0.16, { y: 0.82 });
+}
+
+function buildDeskIslands() {
+  for (const rowZ of [-6.2, -2.0, 2.0, 6.2]) {
+    addDeskIsland(-9.7, rowZ, -1);
+    addDeskIsland(9.7, rowZ, 1);
+  }
+
+  for (const rowZ of [-4.1, 4.1]) {
+    addDeskIsland(-14.1, rowZ, 1);
+    addDeskIsland(14.1, rowZ, -1);
+  }
+}
+
+function addPlant(x, z, scale = 1) {
+  addProp("planter", x, z, 0.68 * scale, 0.58 * scale, 0.68 * scale, materials.pot, 1.25);
+  addProp("plant-stem", x, z, 0.18 * scale, 1.05 * scale, 0.18 * scale, materials.leaf, 0.55, {
+    y: 0.82 * scale,
+    radius: 0.32 * scale,
+  });
+  for (const [ox, oz] of [
+    [-0.25, 0.1],
+    [0.28, -0.12],
+    [0.15, 0.26],
+    [-0.1, -0.28],
+  ]) {
+    addProp("leaf", x + ox * scale, z + oz * scale, 0.46 * scale, 0.28 * scale, 0.38 * scale, materials.leaf, 0.25, {
+      y: rand(1.15, 1.62) * scale,
+      radius: 0.34 * scale,
+    });
+  }
+}
+
+function buildLounge() {
+  addProp("sofa", -14.2, 8.2, 3.25, 0.72, 0.94, materials.tealFabric, 2.2);
+  addProp("sofa", -10.6, 7.2, 0.94, 0.72, 2.55, materials.coralFabric, 1.9);
+  addProp("coffee-table", -12.4, 7.0, 1.6, 0.32, 0.92, materials.woodDark, 1.4);
+  addProp("magazine", -12.2, 6.75, 0.5, 0.035, 0.36, materials.stickyBlue, 0.12, { y: 0.52 });
+  addProp("magazine", -12.65, 7.12, 0.5, 0.035, 0.36, materials.stickyPink, 0.12, { y: 0.56, rotationY: 0.6 });
+  addPlant(-16.2, 9.6, 1.1);
+  addProp("side-table", -9.35, 9.25, 0.72, 0.42, 0.72, materials.wood, 0.8);
+}
+
+function buildCopyZone() {
+  addProp("copy-machine", 14.2, -8.3, 1.42, 1.1, 0.95, materials.paper, 2.2);
+  addProp("scanner-lid", 14.2, -8.88, 1.25, 0.12, 0.18, materials.darkMetal, 0.6, { y: 1.22 });
+  addProp("paper-tray", 14.2, -7.66, 0.9, 0.16, 0.36, materials.metal, 0.45, { y: 0.84 });
+  addProp("recycle-bin", 16.2, -8.3, 0.7, 0.84, 0.7, materials.tealFabric, 0.85);
+
+  for (const x of [10.5, 11.9, 16.9]) {
+    addProp("cabinet", x, -10.1, 1.1, 1.34, 0.66, materials.metal, 2.0);
+  }
+
+  for (let i = 0; i < 10; i += 1) {
+    addProp("loose-paper", rand(10.4, 17.2), rand(-9.6, -6.5), 0.42, 0.035, 0.32, materials.paper, 0.14, {
+      rotationY: rand(-0.7, 0.7),
+    });
+  }
+}
+
+function buildAccentProps() {
+  for (const pos of [
+    [-17, -10],
+    [17, 10],
+    [-4.6, -10.2],
+    [4.6, 10.2],
+    [17, -2],
+    [-17, 2.4],
+  ]) {
+    addPlant(pos[0], pos[1], rand(0.78, 1.12));
   }
 
   for (const pos of [
-    [-15, -9],
-    [15, 9],
-    [-15, 8.2],
-    [15, -8.2],
-    [-2.8, -9],
-    [2.8, 9],
+    [-5.8, 9.9],
+    [5.8, -9.9],
+    [-2.4, 10.05],
+    [2.4, -10.05],
   ]) {
-    addPlant(pos[0], pos[1]);
+    addProp("rolling-cabinet", pos[0], pos[1], 1.05, 1.2, 0.68, materials.metal, 1.9);
   }
 
-  for (const pos of [
-    [-5.8, -9.2],
-    [5.8, 9.2],
-    [-6.4, 9.4],
-    [6.4, -9.4],
-  ]) {
-    addProp("cabinet", pos[0], pos[1], 1.1, 1.35, 0.72, materials.metal, 2.1);
+  for (let i = 0; i < 24; i += 1) {
+    let x = rand(-16, 16);
+    let z = rand(-8.8, 8.8);
+    if (Math.abs(x) < 3.4) {
+      x += x < 0 ? -2.6 : 2.6;
+    }
+    if (isBlockedPoint(x, z, 0.3)) continue;
+    addProp("loose-paper", x, z, 0.45, 0.035, 0.34, pick([materials.paper, materials.stickyBlue, materials.stickyPink]), 0.13, {
+      rotationY: rand(-Math.PI, Math.PI),
+    });
   }
+}
 
-  for (let i = 0; i < 18; i += 1) {
-    addProp("paper", rand(-13, 13), rand(-7.8, 7.8), 0.46, 0.035, 0.34, materials.paper, 0.16);
-  }
+function buildOffice() {
+  buildOfficeShell();
+  buildMeetingRoom();
+  buildDeskIslands();
+  buildLounge();
+  buildCopyZone();
+  buildAccentProps();
 }
 
 function createPlayer(team, index) {
@@ -272,24 +570,52 @@ function createPlayer(team, index) {
   const accent = team === "blue" ? materials.blueDark : materials.redDark;
   const side = team === "blue" ? -1 : 1;
   const group = new THREE.Group();
-  const body = new THREE.Mesh(shared.player, teamColor);
-  body.position.y = 0.82;
+
+  const shadow = new THREE.Mesh(shared.shadow, materials.shadow);
+  shadow.rotation.x = -Math.PI / 2;
+  shadow.position.y = 0.015;
+  group.add(shadow);
+
+  const body = new THREE.Mesh(shared.playerBody, teamColor);
+  body.position.y = 0.84;
   body.castShadow = true;
   body.receiveShadow = true;
   group.add(body);
 
-  const head = new THREE.Mesh(shared.cube, accent);
-  head.scale.set(0.62, 0.46, 0.62);
-  head.position.y = 1.74;
+  const chest = new THREE.Mesh(shared.cube, accent);
+  chest.scale.set(0.66, 0.24, 0.08);
+  chest.position.set(0, 0.98, side * -0.39);
+  chest.castShadow = true;
+  group.add(chest);
+
+  const head = new THREE.Mesh(shared.playerHead, materials.paper);
+  head.position.y = 1.62;
   head.castShadow = true;
   group.add(head);
 
-  const visor = new THREE.Mesh(shared.cube, materials.paper);
-  visor.scale.set(0.42, 0.1, 0.08);
-  visor.position.set(0, 1.78, side * -0.34);
-  group.add(visor);
+  const hair = new THREE.Mesh(shared.cube, accent);
+  hair.scale.set(0.64, 0.16, 0.62);
+  hair.position.y = 1.91;
+  hair.castShadow = true;
+  group.add(hair);
 
-  group.position.set(side * rand(5.6, 12.8), 0, rand(-8, 8));
+  for (const armX of [-0.58, 0.58]) {
+    const arm = new THREE.Mesh(shared.cube, accent);
+    arm.scale.set(0.18, 0.62, 0.2);
+    arm.position.set(armX, 0.96, 0);
+    arm.castShadow = true;
+    group.add(arm);
+  }
+
+  for (const footX of [-0.25, 0.25]) {
+    const foot = new THREE.Mesh(shared.cube, materials.rubber);
+    foot.scale.set(0.24, 0.18, 0.46);
+    foot.position.set(footX, 0.14, side * -0.08);
+    foot.castShadow = true;
+    group.add(foot);
+  }
+
+  group.position.set(side * rand(5.8, 14), 0, rand(-8.5, 8.5));
   scene.add(group);
 
   return {
@@ -298,7 +624,7 @@ function createPlayer(team, index) {
     group,
     velocity: new THREE.Vector3(),
     target: new THREE.Vector3(group.position.x, 0, group.position.z),
-    radius: 0.7,
+    radius: 0.68,
     cooldown: rand(0.2, 1.8),
     stun: 0,
     dodge: rand(0, Math.PI * 2),
@@ -307,14 +633,25 @@ function createPlayer(team, index) {
 }
 
 function createBall(index) {
-  const mesh = new THREE.Mesh(shared.ball, materials.ball);
-  mesh.castShadow = true;
-  mesh.receiveShadow = true;
-  scene.add(mesh);
+  const group = new THREE.Group();
+  const ballCore = new THREE.Mesh(shared.ball, materials.ball);
+  ballCore.castShadow = true;
+  ballCore.receiveShadow = true;
+  group.add(ballCore);
+
+  const stripeA = new THREE.Mesh(shared.torus, materials.ballStripe);
+  stripeA.rotation.x = Math.PI / 2;
+  group.add(stripeA);
+
+  const stripeB = new THREE.Mesh(shared.torus, materials.ballStripe);
+  stripeB.rotation.y = Math.PI / 2;
+  group.add(stripeB);
+
+  scene.add(group);
 
   return {
     index,
-    mesh,
+    mesh: group,
     holder: null,
     team: null,
     airborne: false,
@@ -334,7 +671,7 @@ function resetBall(ball) {
   ball.velocity.set(0, 0, 0);
   ball.spin.set(0, 0, 0);
   ball.age = 0;
-  ball.mesh.position.set(rand(-2.8, 2.8), 0.42, rand(-7.2, 7.2));
+  ball.mesh.position.set(rand(-2.8, 2.8), 0.42, rand(-7.4, 7.4));
   ball.mesh.rotation.set(rand(0, 1), rand(0, 1), rand(0, 1));
   ball.mesh.visible = true;
 }
@@ -353,9 +690,18 @@ function createTeamsAndBalls() {
 }
 
 function pickNewTarget(player) {
-  const laneMin = player.team === "blue" ? -ARENA.halfW + 2.2 : 1.6;
-  const laneMax = player.team === "blue" ? -1.6 : ARENA.halfW - 2.2;
-  player.target.set(rand(laneMin, laneMax), 0, rand(-ARENA.halfD + 2, ARENA.halfD - 2));
+  const laneMin = player.team === "blue" ? -ARENA.halfW + 1.8 : 1.6;
+  const laneMax = player.team === "blue" ? -1.6 : ARENA.halfW - 1.8;
+
+  for (let attempt = 0; attempt < 18; attempt += 1) {
+    const x = rand(laneMin, laneMax);
+    const z = rand(-ARENA.halfD + 1.4, ARENA.halfD - 1.4);
+    if (!isBlockedPoint(x, z, player.radius + 0.3)) {
+      player.target.set(x, 0, z);
+      return;
+    }
+  }
+  player.target.set(rand(laneMin, laneMax), 0, rand(-7, 7));
 }
 
 function nearestOpponent(player) {
@@ -400,9 +746,9 @@ function throwBall(player, ball, target) {
   const dx = to.x - from.x;
   const dz = to.z - from.z;
   const dist = Math.max(1, length2(dx, dz));
-  const leadX = target.velocity.x * 0.46;
-  const leadZ = target.velocity.z * 0.46;
-  const speed = 13 + Math.min(6, dist * 0.28) + chaos * 0.02;
+  const leadX = target.velocity.x * 0.48;
+  const leadZ = target.velocity.z * 0.48;
+  const speed = 14.2 + Math.min(6.8, dist * 0.3) + chaos * 0.022;
   const inv = 1 / Math.max(0.001, length2(dx + leadX, dz + leadZ));
 
   ball.holder = null;
@@ -410,28 +756,28 @@ function throwBall(player, ball, target) {
   ball.airborne = true;
   ball.age = 0;
   ball.mesh.position.set(from.x, 1.35, from.z);
-  ball.velocity.set((dx + leadX) * inv * speed, 3.4 + rand(0.2, 1.2), (dz + leadZ) * inv * speed);
-  ball.spin.set(rand(-12, 12), rand(-12, 12), rand(-12, 12));
-  player.cooldown = rand(0.85, 1.45);
+  ball.velocity.set((dx + leadX) * inv * speed, 3.55 + rand(0.25, 1.35), (dz + leadZ) * inv * speed);
+  ball.spin.set(rand(-16, 16), rand(-16, 16), rand(-16, 16));
+  player.cooldown = rand(0.78, 1.35);
   player.lean = player.team === "blue" ? -0.28 : 0.28;
 }
 
-function spawnPaperBurst(position, count, baseVelocity) {
+function spawnPaperBurst(position, count, baseVelocity, colorMix = false) {
   for (let i = 0; i < count; i += 1) {
-    const mesh = new THREE.Mesh(shared.dust, materials.paper);
+    const mesh = new THREE.Mesh(shared.dust, colorMix ? pick([materials.paper, materials.stickyBlue, materials.stickyPink]) : materials.paper);
     mesh.position.copy(position);
     mesh.position.y += rand(0.1, 0.9);
-    mesh.scale.set(rand(0.8, 1.7), 1, rand(0.8, 1.6));
+    mesh.scale.set(rand(0.8, 1.9), 1, rand(0.8, 1.7));
     scene.add(mesh);
     particles.push({
       mesh,
-      life: rand(0.7, 1.5),
+      life: rand(0.7, 1.6),
       velocity: new THREE.Vector3(
-        baseVelocity.x * 0.12 + rand(-3.2, 3.2),
-        rand(2.2, 6.2),
-        baseVelocity.z * 0.12 + rand(-3.2, 3.2),
+        baseVelocity.x * 0.12 + rand(-3.4, 3.4),
+        rand(2.4, 6.8),
+        baseVelocity.z * 0.12 + rand(-3.4, 3.4),
       ),
-      spin: new THREE.Vector3(rand(-8, 8), rand(-10, 10), rand(-8, 8)),
+      spin: new THREE.Vector3(rand(-9, 9), rand(-11, 11), rand(-9, 9)),
     });
   }
 }
@@ -448,7 +794,7 @@ function hitPlayer(player, ball) {
     redScore += 1;
   }
   chaos = clamp(chaos + 7, 0, 100);
-  spawnPaperBurst(player.group.position, 9, ball.velocity);
+  spawnPaperBurst(player.group.position, 10, ball.velocity, true);
   resetBall(ball);
 }
 
@@ -456,16 +802,40 @@ function kickProp(prop, impulse, sourcePosition) {
   const strength = impulse.length();
   prop.velocity.x += impulse.x / prop.mass;
   prop.velocity.z += impulse.z / prop.mass;
-  prop.velocity.y += Math.min(7, 1.15 + strength * 0.09) / prop.mass;
-  prop.spin.x += rand(-3.4, 3.4) + impulse.z * 0.18;
-  prop.spin.y += rand(-5.8, 5.8);
-  prop.spin.z += rand(-3.4, 3.4) - impulse.x * 0.18;
+  prop.velocity.y += Math.min(7.8, 1.15 + strength * 0.092) / prop.mass;
+  prop.spin.x += rand(-3.8, 3.8) + impulse.z * 0.18;
+  prop.spin.y += rand(-6.2, 6.2);
+  prop.spin.z += rand(-3.8, 3.8) - impulse.x * 0.18;
   prop.air = true;
   prop.health -= 0.25;
-  chaos = clamp(chaos + (prop.kind === "paper" ? 1 : 3), 0, 100);
+  chaos = clamp(chaos + (prop.kind.includes("paper") || prop.kind.includes("note") ? 1 : 3), 0, 100);
 
-  if (prop.kind === "paper" || prop.kind === "monitor" || prop.kind === "plant" || prop.kind === "leaf") {
-    spawnPaperBurst(sourcePosition, prop.kind === "paper" ? 3 : 7, impulse);
+  if (
+    prop.kind.includes("paper") ||
+    prop.kind.includes("monitor") ||
+    prop.kind.includes("plant") ||
+    prop.kind.includes("leaf") ||
+    prop.kind.includes("magazine") ||
+    prop.kind.includes("whiteboard")
+  ) {
+    spawnPaperBurst(sourcePosition, prop.kind.includes("paper") ? 3 : 7, impulse, true);
+  }
+}
+
+function resolveBarriersForEntity(position, radius, velocity = null, height = 1) {
+  for (const barrier of barriers) {
+    if (position.y > barrier.height + height) continue;
+    const hit = circleRectPenetration(position.x, position.z, radius, barrier);
+    if (!hit) continue;
+    position.x += hit.nx * hit.penetration;
+    position.z += hit.nz * hit.penetration;
+    if (velocity) {
+      const dot = velocity.x * hit.nx + velocity.z * hit.nz;
+      if (dot < 0) {
+        velocity.x -= dot * hit.nx * 1.78;
+        velocity.z -= dot * hit.nz * 1.78;
+      }
+    }
   }
 }
 
@@ -473,7 +843,7 @@ function updatePlayers(dt) {
   for (const player of players) {
     player.cooldown -= dt;
     player.stun = Math.max(0, player.stun - dt);
-    player.dodge += dt * (1.5 + player.index * 0.17);
+    player.dodge += dt * (1.55 + player.index * 0.17);
 
     const held = ballHeldBy(player);
     const opponent = nearestOpponent(player);
@@ -491,7 +861,7 @@ function updatePlayers(dt) {
           freeBall.holder = player;
           freeBall.team = player.team;
           freeBall.airborne = false;
-        } else if (Math.random() < 0.02) {
+        } else if (Math.random() < 0.024) {
           player.target.set(freeBall.mesh.position.x, 0, freeBall.mesh.position.z);
         }
       }
@@ -514,30 +884,34 @@ function updatePlayers(dt) {
       const awayX = player.group.position.x - opponent.group.position.x;
       const awayZ = player.group.position.z - opponent.group.position.z;
       const awayLen = Math.max(0.001, length2(awayX, awayZ));
-      if (awayLen < 4.8) {
-        toTarget.x += (awayX / awayLen) * 0.55;
-        toTarget.z += (awayZ / awayLen) * 0.55;
+      if (awayLen < 5.0) {
+        toTarget.x += (awayX / awayLen) * 0.58;
+        toTarget.z += (awayZ / awayLen) * 0.58;
       }
     }
 
     toTarget.z += Math.sin(player.dodge) * 0.34;
-    const moveSpeed = player.stun > 0 ? 1.4 : 4.1 + (held ? 0.4 : 0);
+    const moveSpeed = player.stun > 0 ? 1.35 : 4.25 + (held ? 0.38 : 0);
     const desired = toTarget.multiplyScalar(moveSpeed);
     player.velocity.lerp(desired, player.stun > 0 ? 0.025 : 0.08);
 
     player.group.position.x += player.velocity.x * dt;
     player.group.position.z += player.velocity.z * dt;
-    player.group.position.x = clamp(player.group.position.x, -ARENA.halfW + 1.1, ARENA.halfW - 1.1);
-    player.group.position.z = clamp(player.group.position.z, -ARENA.halfD + 1.1, ARENA.halfD - 1.1);
+    player.group.position.x = clamp(player.group.position.x, -ARENA.halfW + 1.05, ARENA.halfW - 1.05);
+    player.group.position.z = clamp(player.group.position.z, -ARENA.halfD + 1.05, ARENA.halfD - 1.05);
+    resolveBarriersForEntity(player.group.position, player.radius, player.velocity, 1.2);
 
     for (const prop of props) {
       const dx = player.group.position.x - prop.mesh.position.x;
       const dz = player.group.position.z - prop.mesh.position.z;
       const dist = length2(dx, dz);
-      const overlap = player.radius + prop.radius * 0.65 - dist;
+      const overlap = player.radius + prop.radius * 0.58 - dist;
       if (overlap > 0 && dist > 0.001) {
-        player.group.position.x += (dx / dist) * overlap * 0.4;
-        player.group.position.z += (dz / dist) * overlap * 0.4;
+        player.group.position.x += (dx / dist) * overlap * 0.32;
+        player.group.position.z += (dz / dist) * overlap * 0.32;
+        if (prop.mass < 1.2 && player.velocity.length() > 3 && Math.random() < 0.12) {
+          kickProp(prop, player.velocity.clone().multiplyScalar(0.32), player.group.position);
+        }
       }
     }
 
@@ -549,12 +923,12 @@ function updatePlayers(dt) {
 
     if (held) {
       held.mesh.position.set(
-        player.group.position.x + (player.team === "blue" ? 0.55 : -0.55),
-        1.18,
-        player.group.position.z + 0.22,
+        player.group.position.x + (player.team === "blue" ? 0.58 : -0.58),
+        1.2,
+        player.group.position.z + 0.2,
       );
-      held.mesh.rotation.x += dt * 7;
-      held.mesh.rotation.z += dt * 4;
+      held.mesh.rotation.x += dt * 8;
+      held.mesh.rotation.z += dt * 4.4;
     }
   }
 }
@@ -580,12 +954,29 @@ function updateBalls(dt) {
       ball.velocity.z *= -0.72;
       chaos = clamp(chaos + 1, 0, 100);
     }
+
+    for (const barrier of barriers) {
+      if (ball.mesh.position.y > barrier.height + ball.radius) continue;
+      const hit = circleRectPenetration(ball.mesh.position.x, ball.mesh.position.z, ball.radius, barrier);
+      if (!hit) continue;
+      ball.mesh.position.x += hit.nx * hit.penetration;
+      ball.mesh.position.z += hit.nz * hit.penetration;
+      const dot = ball.velocity.x * hit.nx + ball.velocity.z * hit.nz;
+      if (dot < 0) {
+        ball.velocity.x -= dot * hit.nx * 1.72;
+        ball.velocity.z -= dot * hit.nz * 1.72;
+      }
+      ball.velocity.multiplyScalar(0.86);
+      ball.velocity.y += rand(0.2, 0.9);
+      chaos = clamp(chaos + 1.2, 0, 100);
+    }
+
     if (ball.mesh.position.y < ball.radius) {
       ball.mesh.position.y = ball.radius;
       ball.velocity.y *= -0.46;
       ball.velocity.x *= 0.78;
       ball.velocity.z *= 0.78;
-      if (ball.velocity.length() < 3.2 || ball.age > 2.6) {
+      if (ball.velocity.length() < 3.2 || ball.age > 2.7) {
         ball.airborne = false;
         ball.team = null;
         ball.velocity.set(0, 0, 0);
@@ -610,10 +1001,10 @@ function updateBalls(dt) {
       const dz = prop.mesh.position.z - ball.mesh.position.z;
       const dist = Math.sqrt(dx * dx + dy * dy + dz * dz);
       if (dist < prop.radius + ball.radius) {
-        const impulse = ball.velocity.clone().multiplyScalar(0.42);
+        const impulse = ball.velocity.clone().multiplyScalar(0.44);
         kickProp(prop, impulse, ball.mesh.position);
         ball.velocity.multiplyScalar(-0.22);
-        ball.velocity.y += rand(0.3, 1.8);
+        ball.velocity.y += rand(0.3, 1.85);
         break;
       }
     }
@@ -631,7 +1022,7 @@ function updateProps(dt) {
     if (prop.mesh.position.y < prop.baseY) {
       prop.mesh.position.y = prop.baseY;
       if (prop.air && Math.abs(prop.velocity.y) > 1.1) {
-        spawnPaperBurst(prop.mesh.position, prop.kind === "paper" ? 1 : 4, prop.velocity);
+        spawnPaperBurst(prop.mesh.position, prop.kind.includes("paper") ? 1 : 4, prop.velocity, true);
       }
       prop.velocity.y *= -0.24;
       prop.velocity.x *= 0.82;
@@ -642,6 +1033,20 @@ function updateProps(dt) {
         prop.spin.multiplyScalar(0.5);
         prop.air = false;
       }
+    }
+
+    for (const barrier of barriers) {
+      if (prop.mesh.position.y > barrier.height + prop.radius) continue;
+      const hit = circleRectPenetration(prop.mesh.position.x, prop.mesh.position.z, prop.radius * 0.68, barrier);
+      if (!hit) continue;
+      prop.mesh.position.x += hit.nx * hit.penetration;
+      prop.mesh.position.z += hit.nz * hit.penetration;
+      const dot = prop.velocity.x * hit.nx + prop.velocity.z * hit.nz;
+      if (dot < 0) {
+        prop.velocity.x -= dot * hit.nx * 1.45;
+        prop.velocity.z -= dot * hit.nz * 1.45;
+      }
+      prop.velocity.multiplyScalar(0.72);
     }
 
     if (Math.abs(prop.mesh.position.x) > ARENA.halfW - 0.45) {
@@ -682,7 +1087,7 @@ function updateCamera(dt) {
   const mode = cameraModes[cameraModeIndex];
   const bounds = canvas.getBoundingClientRect();
   const aspect = Math.max(0.5, bounds.width / Math.max(1, bounds.height));
-  const zoom = mode === "top" ? 15 : mode === "sideline" ? 14 : 16;
+  const zoom = mode === "top" ? 16.5 : mode === "sideline" ? 14.5 : 17.5;
   camera.left = -zoom * aspect;
   camera.right = zoom * aspect;
   camera.top = zoom;
@@ -691,12 +1096,12 @@ function updateCamera(dt) {
 
   const target = new THREE.Vector3(0, 0, 0);
   if (mode === "top") {
-    camera.position.lerp(new THREE.Vector3(0, 35, 0.01), 1 - Math.pow(0.001, dt));
+    camera.position.lerp(new THREE.Vector3(0, 37, 0.01), 1 - Math.pow(0.001, dt));
   } else if (mode === "sideline") {
-    camera.position.lerp(new THREE.Vector3(0, 13, 24), 1 - Math.pow(0.001, dt));
+    camera.position.lerp(new THREE.Vector3(0, 13.5, 25.5), 1 - Math.pow(0.001, dt));
   } else {
-    const swing = Math.sin(performance.now() * 0.00018) * 2.5;
-    camera.position.lerp(new THREE.Vector3(24 + swing, 22, 24 - swing), 1 - Math.pow(0.001, dt));
+    const swing = Math.sin(performance.now() * 0.00018) * 2.6;
+    camera.position.lerp(new THREE.Vector3(25.5 + swing, 22.5, 25 - swing), 1 - Math.pow(0.001, dt));
   }
   camera.lookAt(target);
 }
@@ -713,8 +1118,8 @@ function updateHud() {
 
 function resizeRenderer() {
   const { clientWidth, clientHeight } = canvas;
-  const needsResize = canvas.width !== Math.floor(clientWidth * renderer.getPixelRatio())
-    || canvas.height !== Math.floor(clientHeight * renderer.getPixelRatio());
+  const ratio = renderer.getPixelRatio();
+  const needsResize = canvas.width !== Math.floor(clientWidth * ratio) || canvas.height !== Math.floor(clientHeight * ratio);
   if (needsResize) {
     renderer.setSize(clientWidth, clientHeight, false);
   }
@@ -728,7 +1133,13 @@ function resetMatch() {
 
   for (const player of players) {
     const side = player.team === "blue" ? -1 : 1;
-    player.group.position.set(side * rand(5.5, 13), 0, rand(-8, 8));
+    let x = side * rand(5.8, 14.4);
+    let z = rand(-8.6, 8.6);
+    for (let attempt = 0; attempt < 12 && isBlockedPoint(x, z, 1.0); attempt += 1) {
+      x = side * rand(5.8, 14.4);
+      z = rand(-8.6, 8.6);
+    }
+    player.group.position.set(x, 0, z);
     player.velocity.set(0, 0, 0);
     player.stun = 0;
     player.cooldown = rand(0.2, 1.7);
@@ -760,7 +1171,7 @@ function animate(now) {
     if (gameTime <= 0) {
       resetMatch();
     }
-    chaos = clamp(chaos - dt * 4.2, 0, 100);
+    chaos = clamp(chaos - dt * 4.0, 0, 100);
     updatePlayers(dt);
     updateBalls(dt);
     updateProps(dt);
@@ -791,7 +1202,6 @@ speedSlider.addEventListener("input", (event) => {
 });
 
 buildOffice();
-buildProps();
 createTeamsAndBalls();
 resetMatch();
 
@@ -801,6 +1211,7 @@ window.__voxelOfficeDodgeball = {
     ballCount: balls.length,
     propCount: props.length,
     particleCount: particles.length,
+    barrierCount: barriers.length,
     blueScore,
     redScore,
     chaos: Math.round(chaos),
