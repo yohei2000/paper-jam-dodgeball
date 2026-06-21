@@ -39,3 +39,12 @@ Materials/textures: glossy glass walls, wood desks, carpet rugs, tiled floor, me
 Constraints: must be useful as a reference for building actual 3D geometry; make every zone legible from top-down; include many throwable small office objects; no text labels; no logo; no watermark
 Avoid: people, characters, dark lighting, messy unreadable clutter, perspective side view, marketing poster look, text, labels, UI, logos, watermarks
 ```
+
+## 2026-06-21 User-Saved Reference Image
+
+The generated concept image was manually saved by the user and copied into the project so it can be used as a durable modeling reference.
+
+- Source: `C:\Users\hitoa\Downloads\生成画像1 (2).png`
+- Project copy: `assets/reference/office-topdown-concept-v2.png`
+
+This project copy is the primary visual reference for the current arena rebuild. The Three.js model now follows the image more closely with a full central dodgeball court, white center line and circle, blue/red team-side utility props, a top cafe/lounge zone, a glass meeting room, bottom reception, and left/right service and storage nooks.

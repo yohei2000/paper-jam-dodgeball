@@ -257,6 +257,18 @@ function makeCylinder({ radius = 0.5, height = 1, position, material, cast = tru
   return mesh;
 }
 
+function addCourtCircle(x, z, radius, material = materials.paper) {
+  const mesh = new THREE.Mesh(shared.torus, material);
+  const scale = radius / 0.34;
+  mesh.scale.set(scale, scale, scale);
+  mesh.rotation.x = Math.PI / 2;
+  mesh.position.set(x, 0.1, z);
+  mesh.castShadow = false;
+  mesh.receiveShadow = true;
+  officeGroup.add(mesh);
+  return mesh;
+}
+
 function addBarrierBox({ x, z, sx, sz, height, y = 0, material, visualHeight = height }) {
   const mesh = makeBox({
     size: { x: sx, y: visualHeight, z: sz },
@@ -352,6 +364,32 @@ function addProp(kind, x, z, sx, sy, sz, material, mass = 1, options = {}) {
   return prop;
 }
 
+function addCylinderProp(kind, x, z, radius, height, material, mass = 1, options = {}) {
+  const mesh = makeCylinder({
+    radius,
+    height,
+    position: { x, y: options.y ?? height / 2, z },
+    material,
+    parent: options.parent ?? scene,
+  });
+
+  const prop = {
+    kind,
+    mesh,
+    baseY: mesh.position.y,
+    homePosition: mesh.position.clone(),
+    homeRotation: mesh.rotation.clone(),
+    radius: options.radius ?? radius * 1.2,
+    mass,
+    velocity: new THREE.Vector3(),
+    spin: new THREE.Vector3(),
+    air: false,
+    health: 1,
+  };
+  props.push(prop);
+  return prop;
+}
+
 function addStaticDetail(x, y, z, sx, sy, sz, material, parent = officeGroup) {
   return makeBox({
     size: { x: sx, y: sy, z: sz },
@@ -396,6 +434,8 @@ function buildOfficeShell() {
   addFloorInset(-13.2, 7.7, 8.4, 5.4, materials.carpetTeal);
   addFloorInset(13.3, -7.6, 7.4, 5.2, materials.carpetPlum);
 
+  addCourtLine(0, 0, 0.18, 17.4, materials.paper);
+  addCourtCircle(0, 0, 1.7, materials.paper);
   addCourtLine(-3.95, 0, 0.12, 17.2, materials.blueTape);
   addCourtLine(3.95, 0, 0.12, 17.2, materials.redTape);
   addCourtLine(0, -8.55, 7.9, 0.12, materials.safetyOrange);
@@ -456,6 +496,27 @@ function buildCentralCourtProps() {
   for (const z of [-6.9, 6.9]) {
     addProp("floor-cable", -0.8, z, 1.3, 0.05, 0.16, materials.rubber, 0.18);
     addProp("floor-cable", 0.8, z, 1.3, 0.05, 0.16, materials.rubber, 0.18);
+  }
+}
+
+function buildTeamUtilityProps() {
+  for (const side of [-1, 1]) {
+    const teamMaterial = side < 0 ? materials.blue : materials.red;
+    const accentMaterial = side < 0 ? materials.blueDark : materials.redDark;
+    const utilityX = side * 16.25;
+    const dividerX = side * 6.35;
+
+    for (const z of [-7.4, -4.6, -0.8, 3.1, 6.8]) {
+      addCylinderProp("team-drum", utilityX, z, 0.38, 0.86, accentMaterial, 0.82);
+    }
+
+    for (const z of [-5.4, 0, 5.4]) {
+      addProp("low-team-divider", dividerX, z, 1.45, 0.42, 0.28, teamMaterial, 0.95);
+      addProp("bumper-pad", dividerX + side * 0.72, z + 0.65, 0.62, 0.34, 0.3, accentMaterial, 0.55);
+    }
+
+    addProp("supply-crate", side * 12.9, -8.9, 1.1, 0.62, 0.82, accentMaterial, 1.05);
+    addProp("supply-crate", side * 12.8, 8.6, 1.0, 0.56, 0.78, teamMaterial, 0.95);
   }
 }
 
@@ -553,11 +614,29 @@ function buildLounge() {
   addProp("side-table", -9.35, 9.25, 0.72, 0.42, 0.72, materials.wood, 0.8);
 }
 
+function buildCafeLounge() {
+  addFloorInset(0, -8.15, 8.4, 4.15, mat(0xd3a66e, { roughness: 0.72 }), 0.045);
+  addProp("lounge-counter", 0, -7.0, 4.5, 0.82, 0.72, materials.woodDark, 3.1);
+  addProp("teal-sofa", -1.85, -9.05, 2.25, 0.72, 0.82, materials.tealFabric, 1.8);
+  addProp("teal-sofa", 1.85, -9.05, 2.25, 0.72, 0.82, materials.tealFabric, 1.8);
+  addCylinderProp("round-table", 0, -9.02, 0.48, 0.42, materials.wood, 0.85);
+  addCylinderProp("round-table", -1.15, -8.1, 0.34, 0.38, materials.wood, 0.55);
+  addCylinderProp("round-table", 1.15, -8.1, 0.34, 0.38, materials.wood, 0.55);
+
+  for (let x = -3.2; x <= 3.2; x += 1.05) {
+    addProp("back-cabinet", x, -10.15, 0.74, 1.18, 0.48, materials.woodDark, 1.35);
+  }
+
+  for (const x of [-2.9, 0, 2.9]) {
+    addCylinderProp("bar-stool", x, -6.35, 0.24, 0.58, materials.metal, 0.42);
+  }
+}
+
 function buildCopyZone() {
   addProp("copy-machine", 14.2, -8.3, 1.42, 1.1, 0.95, materials.paper, 2.2);
   addProp("scanner-lid", 14.2, -8.88, 1.25, 0.12, 0.18, materials.darkMetal, 0.6, { y: 1.22 });
   addProp("paper-tray", 14.2, -7.66, 0.9, 0.16, 0.36, materials.metal, 0.45, { y: 0.84 });
-  addProp("recycle-bin", 16.2, -8.3, 0.7, 0.84, 0.7, materials.tealFabric, 0.85);
+  addCylinderProp("recycle-bin", 16.2, -8.3, 0.38, 0.84, materials.tealFabric, 0.85);
 
   for (const x of [10.5, 11.9, 16.9]) {
     addProp("cabinet", x, -10.1, 1.1, 1.34, 0.66, materials.metal, 2.0);
@@ -567,6 +646,29 @@ function buildCopyZone() {
     addProp("loose-paper", rand(10.4, 17.2), rand(-9.6, -6.5), 0.42, 0.035, 0.32, materials.paper, 0.14, {
       rotationY: rand(-0.7, 0.7),
     });
+  }
+}
+
+function buildServiceNooks() {
+  addFloorInset(-15.2, 9.1, 5.2, 2.65, mat(0x334155, { roughness: 0.86 }), 0.045);
+  addProp("storage-shelf", -17.0, 9.4, 1.15, 1.24, 0.58, materials.darkMetal, 1.65);
+  addProp("storage-shelf", -15.6, 9.4, 1.15, 1.24, 0.58, materials.darkMetal, 1.65);
+  addProp("box-stack", -13.8, 9.7, 0.95, 0.82, 0.75, materials.wood, 0.9);
+  addProp("box-stack", -14.6, 8.55, 0.7, 0.62, 0.58, materials.wood, 0.68);
+
+  addFloorInset(13.7, 9.0, 5.5, 2.7, mat(0xe1e7ed, { roughness: 0.7 }), 0.045);
+  addProp("service-printer", 12.2, 9.08, 1.05, 0.95, 0.72, materials.paper, 1.75);
+  addProp("service-copier", 14.0, 9.05, 1.18, 1.12, 0.82, materials.paper, 2.0);
+  addProp("parcel-cart", 15.8, 8.85, 0.95, 0.82, 0.72, materials.wood, 0.95);
+  addCylinderProp("round-service-table", 16.8, 9.62, 0.34, 0.42, materials.paper, 0.5);
+
+  for (const [x, z] of [
+    [12.0, 10.15],
+    [13.1, 10.2],
+    [15.4, 9.72],
+    [16.2, 8.15],
+  ]) {
+    addProp("parcel", x, z, 0.5, 0.38, 0.42, materials.wood, 0.38);
   }
 }
 
@@ -597,6 +699,7 @@ function buildReceptionAndStorage() {
 
   addLockerRow(-17.55, -3.6, 1, materials.lockerBlue);
   addLockerRow(17.55, 3.6, -1, materials.lockerRed);
+  addLockerRow(17.55, -7.5, -1, materials.lockerRed);
 
   addStorageCart(-5.7, -8.85, materials.cartGreen);
   addStorageCart(5.7, 8.85, materials.cartGreen);
@@ -641,10 +744,13 @@ function buildAccentProps() {
 function buildOffice() {
   buildOfficeShell();
   buildCentralCourtProps();
+  buildTeamUtilityProps();
   buildMeetingRoom();
   buildDeskIslands();
+  buildCafeLounge();
   buildLounge();
   buildCopyZone();
+  buildServiceNooks();
   buildReceptionAndStorage();
   buildAccentProps();
 }
