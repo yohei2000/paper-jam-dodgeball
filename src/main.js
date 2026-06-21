@@ -158,8 +158,16 @@ const materials = {
   floorLine: mat(palette.floorLine, { roughness: 0.72 }),
   courtBlue: mat(0xcfe7f6, { roughness: 0.78 }),
   courtRed: mat(0xf4d7d4, { roughness: 0.78 }),
+  courtLane: mat(0xf4f8fb, { roughness: 0.62 }),
+  blueTape: mat(0x38bdf8, { roughness: 0.54 }),
+  redTape: mat(0xfb7185, { roughness: 0.54 }),
+  safetyOrange: mat(0xf97316, { roughness: 0.48 }),
   carpetTeal: mat(0x6ab4aa, { roughness: 0.88 }),
   carpetPlum: mat(0xa77aa7, { roughness: 0.86 }),
+  receptionStone: mat(0xd9dde2, { roughness: 0.46, metalness: 0.08 }),
+  lockerBlue: mat(0x3b82f6, { roughness: 0.58, metalness: 0.08 }),
+  lockerRed: mat(0xf43f5e, { roughness: 0.58, metalness: 0.08 }),
+  cartGreen: mat(0x22c55e, { roughness: 0.74 }),
   warmWall: mat(palette.warmWall, { roughness: 0.7 }),
   wallTrim: mat(0xd6c3ad, { roughness: 0.6 }),
   glass: new THREE.MeshPhysicalMaterial({
@@ -315,6 +323,10 @@ function addFloorInset(x, z, sx, sz, material, y = 0.022) {
   });
 }
 
+function addCourtLine(x, z, sx, sz, material = materials.safetyOrange) {
+  addStaticDetail(x, 0.075, z, sx, 0.045, sz, material);
+}
+
 function addProp(kind, x, z, sx, sy, sz, material, mass = 1, options = {}) {
   const mesh = makeBox({
     size: { x: sx, y: sy, z: sz },
@@ -380,11 +392,27 @@ function buildOfficeShell() {
 
   addFloorInset(-9.5, 0, 17, 21.4, materials.courtBlue);
   addFloorInset(9.5, 0, 17, 21.4, materials.courtRed);
+  addFloorInset(0, 0, 7.8, 18.8, materials.courtLane, 0.035);
   addFloorInset(-13.2, 7.7, 8.4, 5.4, materials.carpetTeal);
   addFloorInset(13.3, -7.6, 7.4, 5.2, materials.carpetPlum);
 
-  for (let z = -8; z <= 8; z += 4) {
-    addStaticDetail(0, 0.06, z, 0.12, 0.045, 2.3, materials.ballStripe);
+  addCourtLine(-3.95, 0, 0.12, 17.2, materials.blueTape);
+  addCourtLine(3.95, 0, 0.12, 17.2, materials.redTape);
+  addCourtLine(0, -8.55, 7.9, 0.12, materials.safetyOrange);
+  addCourtLine(0, 8.55, 7.9, 0.12, materials.safetyOrange);
+
+  for (let z = -7.2; z <= 7.2; z += 3.6) {
+    addCourtLine(0, z, 0.14, 2.2, materials.safetyOrange);
+  }
+
+  for (const [x, material] of [
+    [-5.35, materials.blueTape],
+    [5.35, materials.redTape],
+  ]) {
+    for (const z of [-4.8, 0, 4.8]) {
+      addFloorInset(x, z, 1.15, 1.15, material, 0.055);
+      addStaticDetail(x, 0.095, z, 0.64, 0.045, 0.64, materials.ballStripe);
+    }
   }
 
   for (const z of [-10.7, 10.7]) {
@@ -408,6 +436,26 @@ function buildOfficeShell() {
     [12, 5.4, 4.2, 1.05],
   ]) {
     addCeilingLight(x, z, sx, sz);
+  }
+}
+
+function buildCentralCourtProps() {
+  for (const z of [-5.7, 0, 5.7]) {
+    addBarrierBox({ x: -4.35, z, sx: 0.16, sz: 2.55, height: 0.82, material: materials.glassEdge, visualHeight: 0.82 });
+    addBarrierBox({ x: 4.35, z, sx: 0.16, sz: 2.55, height: 0.82, material: materials.glassEdge, visualHeight: 0.82 });
+  }
+
+  for (const [x, material] of [
+    [-2.2, materials.blueTape],
+    [2.2, materials.redTape],
+  ]) {
+    addProp("ball-crate", x, -9.05, 1.15, 0.42, 0.72, material, 1.25);
+    addProp("ball-crate", x, 9.05, 1.15, 0.42, 0.72, material, 1.25);
+  }
+
+  for (const z of [-6.9, 6.9]) {
+    addProp("floor-cable", -0.8, z, 1.3, 0.05, 0.16, materials.rubber, 0.18);
+    addProp("floor-cable", 0.8, z, 1.3, 0.05, 0.16, materials.rubber, 0.18);
   }
 }
 
@@ -522,6 +570,40 @@ function buildCopyZone() {
   }
 }
 
+function addLockerRow(x, z, side, material) {
+  for (let i = 0; i < 4; i += 1) {
+    const offset = (i - 1.5) * 0.92;
+    const locker = addProp("locker", x, z + offset, 0.72, 1.58, 0.48, material, 1.55, {
+      radius: 0.52,
+    });
+    addStaticDetail(locker.mesh.position.x, 1.05, locker.mesh.position.z + side * 0.25, 0.42, 0.05, 0.04, materials.paper);
+    addStaticDetail(locker.mesh.position.x, 0.75, locker.mesh.position.z + side * 0.25, 0.14, 0.05, 0.04, materials.darkMetal);
+  }
+}
+
+function addStorageCart(x, z, material) {
+  addProp("storage-cart", x, z, 1.15, 0.72, 0.78, material, 1.05);
+  addProp("file-box", x - 0.24, z - 0.18, 0.46, 0.34, 0.38, materials.paper, 0.28, { y: 0.88 });
+  addProp("binder", x + 0.32, z + 0.2, 0.46, 0.16, 0.32, materials.ink, 0.24, { y: 0.82 });
+}
+
+function buildReceptionAndStorage() {
+  addFloorInset(0, 9.2, 7.6, 2.5, mat(0xe4edf1, { roughness: 0.66 }), 0.045);
+  addProp("reception-counter", 0, 9.62, 4.4, 0.92, 0.72, materials.receptionStone, 3.2);
+  addProp("front-monitor", -1.0, 9.22, 0.62, 0.48, 0.12, materials.screen, 0.52, { y: 1.28 });
+  addProp("front-monitor", 1.0, 9.22, 0.62, 0.48, 0.12, materials.screen, 0.52, { y: 1.28 });
+  addProp("visitor-stool", -2.45, 8.55, 0.55, 0.5, 0.55, materials.tealFabric, 0.58);
+  addProp("visitor-stool", 2.45, 8.55, 0.55, 0.5, 0.55, materials.coralFabric, 0.58);
+
+  addLockerRow(-17.55, -3.6, 1, materials.lockerBlue);
+  addLockerRow(17.55, 3.6, -1, materials.lockerRed);
+
+  addStorageCart(-5.7, -8.85, materials.cartGreen);
+  addStorageCart(5.7, 8.85, materials.cartGreen);
+  addStorageCart(15.65, 6.6, materials.metal);
+  addStorageCart(-15.65, -6.7, materials.metal);
+}
+
 function buildAccentProps() {
   for (const pos of [
     [-17, -10],
@@ -558,10 +640,12 @@ function buildAccentProps() {
 
 function buildOffice() {
   buildOfficeShell();
+  buildCentralCourtProps();
   buildMeetingRoom();
   buildDeskIslands();
   buildLounge();
   buildCopyZone();
+  buildReceptionAndStorage();
   buildAccentProps();
 }
 
