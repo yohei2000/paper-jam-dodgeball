@@ -34,6 +34,7 @@ const BALL_COUNT = 6;
 const PROP_THROW_CHANCE = 0.42;
 const MAX_THROWABLE_PROP_MASS = 1.08;
 const MAX_THROWABLE_PROP_RADIUS = 1.05;
+const PLAYER_GRAVITY = 12.8;
 const cameraModes = ["iso", "top", "sideline"];
 
 const palette = {
@@ -306,17 +307,11 @@ type AtlasMaterialSlot = {
 const atlasMaterialSlots: AtlasMaterialSlot[] = [
   { key: "floor", column: 0, row: 0, repeatX: 9, repeatY: 6 },
   { key: "floorLine", column: 1, row: 0, repeatX: 2, repeatY: 1 },
-  { key: "courtBlue", column: 1, row: 0, repeatX: 5, repeatY: 5 },
-  { key: "courtRed", column: 1, row: 0, repeatX: 5, repeatY: 5 },
   { key: "courtLane", column: 3, row: 0, repeatX: 3, repeatY: 5 },
-  { key: "blueTape", column: 2, row: 2, repeatX: 1.5, repeatY: 1 },
-  { key: "redTape", column: 3, row: 2, repeatX: 1.5, repeatY: 1 },
   { key: "safetyOrange", column: 0, row: 4, repeatX: 1.5, repeatY: 1.5 },
   { key: "carpetTeal", column: 0, row: 2, repeatX: 4, repeatY: 3 },
   { key: "carpetPlum", column: 1, row: 2, repeatX: 4, repeatY: 3 },
   { key: "receptionStone", column: 0, row: 0, repeatX: 2, repeatY: 2 },
-  { key: "lockerBlue", column: 1, row: 4, repeatX: 1, repeatY: 1 },
-  { key: "lockerRed", column: 2, row: 4, repeatX: 1, repeatY: 1 },
   { key: "cartGreen", column: 3, row: 3, repeatX: 1, repeatY: 1 },
   { key: "warmWall", column: 3, row: 4, repeatX: 4, repeatY: 1.5 },
   { key: "glass", column: 2, row: 1, repeatX: 2, repeatY: 1 },
@@ -325,10 +320,6 @@ const atlasMaterialSlots: AtlasMaterialSlot[] = [
   { key: "metal", column: 3, row: 1, repeatX: 1.4, repeatY: 1.1 },
   { key: "darkMetal", column: 2, row: 3, repeatX: 1, repeatY: 1 },
   { key: "rubber", column: 2, row: 3, repeatX: 2, repeatY: 1 },
-  { key: "blue", column: 2, row: 2, repeatX: 1, repeatY: 1 },
-  { key: "blueDark", column: 1, row: 4, repeatX: 1, repeatY: 1 },
-  { key: "red", column: 3, row: 2, repeatX: 1, repeatY: 1 },
-  { key: "redDark", column: 2, row: 4, repeatX: 1, repeatY: 1 },
   { key: "tealFabric", column: 0, row: 2, repeatX: 1.5, repeatY: 1 },
   { key: "coralFabric", column: 1, row: 2, repeatX: 1.5, repeatY: 1 },
   { key: "leaf", column: 3, row: 3, repeatX: 1, repeatY: 1 },
@@ -380,6 +371,7 @@ const eventCounters = {
   barrierFractures: 0,
   wallFractures: 0,
   deskFractures: 0,
+  playerLaunches: 0,
   particlesSpawned: 0,
 };
 
@@ -1079,6 +1071,7 @@ function createPlayer(team, index) {
     team,
     index,
     group,
+    shadow,
     velocity: new THREE.Vector3(),
     target: new THREE.Vector3(group.position.x, 0, group.position.z),
     radius: 0.68,
@@ -1086,6 +1079,11 @@ function createPlayer(team, index) {
     stun: 0,
     dodge: rand(0, Math.PI * 2),
     lean: 0,
+    airY: 0,
+    airVelocity: 0,
+    knockbackTime: 0,
+    tumble: 0,
+    tumbleVelocity: 0,
   };
 }
 
@@ -1286,11 +1284,65 @@ function spawnPaperBurst(position, count, baseVelocity, colorMix = false) {
   }
 }
 
+function dropHeldItems(player, sourceVelocity) {
+  const heldBall = ballHeldBy(player);
+  if (heldBall) {
+    heldBall.holder = null;
+    heldBall.team = null;
+    heldBall.airborne = true;
+    heldBall.age = 0;
+    heldBall.mesh.position.set(player.group.position.x, 1.1 + player.airY, player.group.position.z);
+    heldBall.velocity.set(
+      sourceVelocity.x * 0.18 + rand(-1.8, 1.8),
+      rand(1.8, 3.2),
+      sourceVelocity.z * 0.18 + rand(-1.8, 1.8),
+    );
+    heldBall.spin.set(rand(-5, 5), rand(-7, 7), rand(-5, 5));
+  }
+
+  const heldProp = propHeldBy(player);
+  if (heldProp) {
+    heldProp.holder = null;
+    heldProp.team = null;
+    heldProp.air = true;
+    heldProp.throwAge = 99;
+    heldProp.baseY = heldProp.floorY;
+    heldProp.pickupCooldown = 0.85;
+    heldProp.impactCooldown = 0.16;
+    heldProp.chainCooldown = 0.12;
+    heldProp.mesh.position.set(player.group.position.x, 1.05 + Math.min(0.45, heldProp.radius * 0.3) + player.airY, player.group.position.z);
+    heldProp.velocity.set(
+      sourceVelocity.x * 0.16 + rand(-1.5, 1.5),
+      rand(1.2, 2.8),
+      sourceVelocity.z * 0.16 + rand(-1.5, 1.5),
+    );
+    heldProp.spin.set(rand(-1.5, 1.5), rand(-2.4, 2.4), rand(-1.5, 1.5));
+  }
+}
+
+function launchPlayer(player, sourceVelocity, liftBias = 0) {
+  const planarSpeed = Math.max(0.001, length2(sourceVelocity.x, sourceVelocity.z));
+  const speed = clamp(sourceVelocity.length(), 4, 20);
+  const nx = sourceVelocity.x / planarSpeed;
+  const nz = sourceVelocity.z / planarSpeed;
+  const lateral = 2.4 + speed * 0.2;
+  const sideKick = rand(-0.9, 0.9);
+
+  dropHeldItems(player, sourceVelocity);
+  eventCounters.playerLaunches += 1;
+  player.velocity.x += nx * lateral - nz * sideKick;
+  player.velocity.z += nz * lateral + nx * sideKick;
+  player.airY = Math.max(player.airY, 0.03);
+  player.airVelocity = Math.max(player.airVelocity, 2.35 + speed * 0.075 + liftBias);
+  player.knockbackTime = Math.max(player.knockbackTime, 0.5 + speed * 0.018);
+  player.tumbleVelocity = clampComponent(player.tumbleVelocity + (sourceVelocity.x >= 0 ? -1 : 1) * (1.25 + speed * 0.04), 2.9);
+  player.tumble = clampComponent(player.tumble + (sourceVelocity.x >= 0 ? -0.28 : 0.28), 0.75);
+}
+
 function hitPlayer(player, ball) {
   eventCounters.playerHitsByBall += 1;
-  const impulse = ball.velocity.clone().multiplyScalar(0.1);
-  player.velocity.add(new THREE.Vector3(impulse.x, 0, impulse.z));
-  player.stun = 1.05;
+  launchPlayer(player, ball.velocity, 0.35);
+  player.stun = Math.max(player.stun, 1.05);
   player.lean = ball.velocity.x > 0 ? 0.65 : -0.65;
 
   if (ball.team === "blue") {
@@ -1370,9 +1422,8 @@ function throwProp(player, prop, target) {
 
 function hitPlayerWithProp(player, prop) {
   eventCounters.playerHitsByProp += 1;
-  const impulse = prop.velocity.clone().multiplyScalar(0.075);
-  player.velocity.add(new THREE.Vector3(impulse.x, 0, impulse.z));
-  player.stun = 0.68 + Math.min(0.55, prop.velocity.length() * 0.025);
+  launchPlayer(player, prop.velocity, isFlutterProp(prop) ? 0.05 : 0.22);
+  player.stun = Math.max(player.stun, 0.68 + Math.min(0.55, prop.velocity.length() * 0.025));
   player.lean = prop.velocity.x > 0 ? 0.52 : -0.52;
 
   if (prop.team === "blue") {
@@ -1645,23 +1696,25 @@ function updatePlayers(dt) {
   for (const player of players) {
     player.cooldown -= dt;
     player.stun = Math.max(0, player.stun - dt);
+    player.knockbackTime = Math.max(0, player.knockbackTime - dt);
     player.dodge += dt * (1.55 + player.index * 0.17);
+    const launched = player.knockbackTime > 0 || player.airY > 0.025 || Math.abs(player.airVelocity) > 0.05;
 
     let heldBall = ballHeldBy(player);
     let heldProp = propHeldBy(player);
     const opponent = nearestOpponent(player);
 
-    if (heldBall && opponent && player.cooldown <= 0 && player.stun <= 0) {
+    if (!launched && heldBall && opponent && player.cooldown <= 0 && player.stun <= 0) {
       throwBall(player, heldBall, opponent);
       heldBall = null;
-    } else if (heldProp && opponent && player.cooldown <= 0 && player.stun <= 0) {
+    } else if (!launched && heldProp && opponent && player.cooldown <= 0 && player.stun <= 0) {
       throwProp(player, heldProp, opponent);
       heldProp = null;
     }
 
     const holding = heldBall || heldProp;
 
-    if (!holding && player.stun <= 0) {
+    if (!launched && !holding && player.stun <= 0) {
       const freeBall = nearestFreeBall(player);
       const looseProp = nearestThrowableProp(player);
       const preferProp = looseProp && (!freeBall || chance(PROP_THROW_CHANCE + chaos * 0.003));
@@ -1689,40 +1742,69 @@ function updatePlayers(dt) {
       }
     }
 
-    const distToTarget = player.group.position.distanceTo(player.target);
-    if (distToTarget < 1.1 || chance(0.006)) {
-      pickNewTarget(player);
-    }
-
-    const toTarget = new THREE.Vector3(
-      player.target.x - player.group.position.x,
-      0,
-      player.target.z - player.group.position.z,
-    );
-    const targetLen = Math.max(0.001, length2(toTarget.x, toTarget.z));
-    toTarget.multiplyScalar(1 / targetLen);
-
-    const stillHolding = heldBall || heldProp;
-    if (opponent && !stillHolding) {
-      const awayX = player.group.position.x - opponent.group.position.x;
-      const awayZ = player.group.position.z - opponent.group.position.z;
-      const awayLen = Math.max(0.001, length2(awayX, awayZ));
-      if (awayLen < 5.0) {
-        toTarget.x += (awayX / awayLen) * 0.58;
-        toTarget.z += (awayZ / awayLen) * 0.58;
+    if (launched) {
+      const drag = player.airY > 0.025 ? 0.965 : 0.36;
+      player.velocity.x *= Math.pow(drag, dt);
+      player.velocity.z *= Math.pow(drag, dt);
+    } else {
+      const distToTarget = player.group.position.distanceTo(player.target);
+      if (distToTarget < 1.1 || chance(0.006)) {
+        pickNewTarget(player);
       }
-    }
 
-    toTarget.z += Math.sin(player.dodge) * 0.34;
-    const moveSpeed = player.stun > 0 ? 1.35 : 4.25 + (heldBall ? 0.38 : 0) - (heldProp ? 0.18 : 0);
-    const desired = toTarget.multiplyScalar(moveSpeed);
-    player.velocity.lerp(desired, player.stun > 0 ? 0.025 : 0.08);
+      const toTarget = new THREE.Vector3(
+        player.target.x - player.group.position.x,
+        0,
+        player.target.z - player.group.position.z,
+      );
+      const targetLen = Math.max(0.001, length2(toTarget.x, toTarget.z));
+      toTarget.multiplyScalar(1 / targetLen);
+
+      const stillHolding = heldBall || heldProp;
+      if (opponent && !stillHolding) {
+        const awayX = player.group.position.x - opponent.group.position.x;
+        const awayZ = player.group.position.z - opponent.group.position.z;
+        const awayLen = Math.max(0.001, length2(awayX, awayZ));
+        if (awayLen < 5.0) {
+          toTarget.x += (awayX / awayLen) * 0.58;
+          toTarget.z += (awayZ / awayLen) * 0.58;
+        }
+      }
+
+      toTarget.z += Math.sin(player.dodge) * 0.34;
+      const moveSpeed = player.stun > 0 ? 1.35 : 4.25 + (heldBall ? 0.38 : 0) - (heldProp ? 0.18 : 0);
+      const desired = toTarget.multiplyScalar(moveSpeed);
+      player.velocity.lerp(desired, player.stun > 0 ? 0.025 : 0.08);
+    }
 
     player.group.position.x += player.velocity.x * dt;
     player.group.position.z += player.velocity.z * dt;
-    player.group.position.x = clamp(player.group.position.x, -ARENA.halfW + 1.05, ARENA.halfW - 1.05);
-    player.group.position.z = clamp(player.group.position.z, -ARENA.halfD + 1.05, ARENA.halfD - 1.05);
+    const clampedX = clamp(player.group.position.x, -ARENA.halfW + 1.05, ARENA.halfW - 1.05);
+    const clampedZ = clamp(player.group.position.z, -ARENA.halfD + 1.05, ARENA.halfD - 1.05);
+    if (launched && clampedX !== player.group.position.x) player.velocity.x *= -0.28;
+    if (launched && clampedZ !== player.group.position.z) player.velocity.z *= -0.28;
+    player.group.position.x = clampedX;
+    player.group.position.z = clampedZ;
     resolveBarriersForEntity(player.group.position, player.radius, player.velocity, 1.2);
+
+    const wasAirborne = player.airY > 0.025 || player.airVelocity > 0;
+    if (player.airY > 0 || player.airVelocity > 0) {
+      player.airVelocity -= PLAYER_GRAVITY * dt;
+      player.airY += player.airVelocity * dt;
+      if (player.airY <= 0) {
+        if (wasAirborne && player.airVelocity < -2.25) {
+          spawnPaperBurst(player.group.position, 5, player.velocity, true);
+          chaos = clamp(chaos + 1.4, 0, 100);
+        }
+        player.airY = 0;
+        player.airVelocity = 0;
+        player.velocity.x *= 0.68;
+        player.velocity.z *= 0.68;
+      }
+    }
+    player.tumble += player.tumbleVelocity * dt;
+    player.tumbleVelocity *= Math.pow(player.airY > 0.025 ? 0.74 : 0.18, dt);
+    player.tumble = THREE.MathUtils.lerp(player.tumble, 0, player.airY > 0.025 ? 0.018 : 0.12);
 
     for (const prop of props) {
       if (prop.broken || prop.holder) continue;
@@ -1742,8 +1824,13 @@ function updatePlayers(dt) {
     const facing = Math.atan2(player.velocity.x, player.velocity.z);
     player.group.rotation.y = THREE.MathUtils.lerp(player.group.rotation.y, facing, 0.14);
     player.lean = THREE.MathUtils.lerp(player.lean, 0, 0.06);
-    player.group.rotation.z = player.lean;
-    player.group.position.y = Math.max(0, Math.sin(performance.now() * 0.012 + player.index) * 0.035);
+    player.group.rotation.z = player.lean + player.tumble;
+    player.group.rotation.x = THREE.MathUtils.lerp(player.group.rotation.x, clampComponent(-player.tumble * 0.42, 0.36), 0.16);
+    const bob = player.airY > 0.025 ? 0 : Math.sin(performance.now() * 0.012 + player.index) * 0.035;
+    player.group.position.y = Math.max(0, player.airY + bob);
+    player.shadow.position.y = 0.015 - player.group.position.y;
+    const shadowScale = 1 + Math.min(0.55, player.airY * 0.16);
+    player.shadow.scale.set(shadowScale, shadowScale, shadowScale);
 
     if (heldBall) {
       heldBall.mesh.position.set(
@@ -2069,6 +2156,16 @@ function resetMatch() {
     player.velocity.set(0, 0, 0);
     player.stun = 0;
     player.cooldown = rand(0.2, 1.7);
+    player.lean = 0;
+    player.airY = 0;
+    player.airVelocity = 0;
+    player.knockbackTime = 0;
+    player.tumble = 0;
+    player.tumbleVelocity = 0;
+    player.group.rotation.x = 0;
+    player.group.rotation.z = 0;
+    player.shadow.position.y = 0.015;
+    player.shadow.scale.set(1, 1, 1);
     pickNewTarget(player);
   }
 
@@ -2169,6 +2266,7 @@ window.__voxelOfficeDodgeball = {
     activePropCount: props.filter((prop) => length2(prop.velocity.x, prop.velocity.z) > 0.2 || prop.air).length,
     brokenPropCount: props.filter((prop) => prop.broken).length,
     dynamicFragmentCount: props.filter((prop) => prop.dynamic).length,
+    airbornePlayerCount: players.filter((player) => player.airY > 0.05 || player.knockbackTime > 0).length,
     particleCount: particles.length,
     barrierCount: barriers.length,
     brokenBarrierCount: barriers.filter((barrier) => barrier.broken).length,
@@ -2195,6 +2293,7 @@ window.__voxelOfficeDodgeball = {
       x: Number(player.group.position.x.toFixed(2)),
       z: Number(player.group.position.z.toFixed(2)),
       stun: Number(player.stun.toFixed(2)),
+      airY: Number(player.airY.toFixed(2)),
     })),
     canvas: {
       width: canvas.width,

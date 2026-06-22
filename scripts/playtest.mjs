@@ -40,6 +40,7 @@ function parseArgs(argv) {
     maxChaosTime: 30,
     minBrokenProps: 8,
     minFragments: 60,
+    minPlayerLaunches: 4,
     maxFragments: 900,
     maxParticles: 1800,
     maxScoreSpread: 45,
@@ -88,6 +89,9 @@ function parseArgs(argv) {
       case "--min-fragments":
         options.minFragments = Number(value);
         break;
+      case "--min-player-launches":
+        options.minPlayerLaunches = Number(value);
+        break;
       case "--max-fragments":
         options.maxFragments = Number(value);
         break;
@@ -124,6 +128,7 @@ Options:
   --out=playtests/name      Output directory.
   --chrome=PATH             Chrome executable path. CHROME_PATH also works.
   --skip-build              Reuse the existing dist/ build.
+  --min-player-launches=N   Minimum launched players per run.
 `);
 }
 
@@ -261,6 +266,11 @@ function evaluateRun(run, options) {
       `dynamicFragmentCount=${final.dynamicFragmentCount}, min=${options.minFragments}`,
     );
     add(
+      "players_launch",
+      (final.events?.playerLaunches ?? 0) >= options.minPlayerLaunches,
+      `playerLaunches=${final.events?.playerLaunches ?? 0}, min=${options.minPlayerLaunches}`,
+    );
+    add(
       "fragments_bounded",
       final.dynamicFragmentCount <= options.maxFragments,
       `dynamicFragmentCount=${final.dynamicFragmentCount}, max=${options.maxFragments}`,
@@ -298,6 +308,7 @@ function summarizeRuns(runs, options) {
       brokenPropCount: average((m) => m.brokenPropCount),
       brokenBarrierCount: average((m) => m.brokenBarrierCount),
       dynamicFragmentCount: average((m) => m.dynamicFragmentCount),
+      playerLaunches: average((m) => m.events?.playerLaunches ?? 0),
       activePropCount: average((m) => m.activePropCount),
       particleCount: average((m) => m.particleCount),
       scoreSpread: average((m) => m.scoreSpread),
@@ -324,6 +335,7 @@ function markdownReport({ options, summary, runs, outputDir }) {
     `| brokenPropCount | ${summary.averages.brokenPropCount ?? "n/a"} |`,
     `| brokenBarrierCount | ${summary.averages.brokenBarrierCount ?? "n/a"} |`,
     `| dynamicFragmentCount | ${summary.averages.dynamicFragmentCount ?? "n/a"} |`,
+    `| playerLaunches | ${summary.averages.playerLaunches ?? "n/a"} |`,
     `| activePropCount | ${summary.averages.activePropCount ?? "n/a"} |`,
     `| particleCount | ${summary.averages.particleCount ?? "n/a"} |`,
     `| scoreSpread | ${summary.averages.scoreSpread ?? "n/a"} |`,
@@ -342,6 +354,7 @@ function markdownReport({ options, summary, runs, outputDir }) {
       lines.push(`- Time to chaos 80: ${final.timeToChaos80 ?? "never"}`);
       lines.push(`- Broken props/barriers: ${final.brokenPropCount}/${final.brokenBarrierCount}`);
       lines.push(`- Dynamic fragments: ${final.dynamicFragmentCount}`);
+      lines.push(`- Player launches: ${final.events?.playerLaunches ?? 0}`);
       lines.push(`- Active props: ${final.activePropCount}`);
       lines.push(`- Particles: ${final.particleCount}`);
       lines.push(`- Score: Blue ${final.blueScore} / Red ${final.redScore}`);
