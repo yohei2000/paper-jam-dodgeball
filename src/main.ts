@@ -24,6 +24,8 @@ const pauseButton = requireElement<HTMLButtonElement>("#pauseButton");
 const cameraButton = requireElement<HTMLButtonElement>("#cameraButton");
 const resetButton = requireElement<HTMLButtonElement>("#resetButton");
 const speedSlider = requireElement<HTMLInputElement>("#speedSlider");
+const urlParams = new URLSearchParams(window.location.search);
+const runSeedParam = urlParams.get("seed") ?? urlParams.get("playtestSeed");
 
 const ARENA = { width: 38, depth: 24, halfW: 19, halfD: 12 };
 const MATCH_LENGTH = 150;
@@ -364,13 +366,58 @@ let paused = false;
 let cameraModeIndex = 0;
 let speedScale = 1;
 let lastTime = performance.now();
+let matchElapsed = 0;
+let peakChaos = 0;
+let timeToChaos80: number | null = null;
+const eventCounters = {
+  ballThrows: 0,
+  propThrows: 0,
+  playerHitsByBall: 0,
+  playerHitsByProp: 0,
+  propImpacts: 0,
+  propChainImpacts: 0,
+  propFractures: 0,
+  barrierFractures: 0,
+  wallFractures: 0,
+  deskFractures: 0,
+  particlesSpawned: 0,
+};
+
+function resetPlaytestCounters() {
+  matchElapsed = 0;
+  peakChaos = 0;
+  timeToChaos80 = null;
+  for (const key of Object.keys(eventCounters) as Array<keyof typeof eventCounters>) {
+    eventCounters[key] = 0;
+  }
+}
+
+function hashSeed(value: string) {
+  let hash = 2166136261;
+  for (let i = 0; i < value.length; i += 1) {
+    hash ^= value.charCodeAt(i);
+    hash = Math.imul(hash, 16777619);
+  }
+  return hash >>> 0;
+}
+
+let randomState = runSeedParam ? hashSeed(runSeedParam) || 1 : 0;
+
+function seededRandom() {
+  randomState = (Math.imul(1664525, randomState) + 1013904223) >>> 0;
+  return randomState / 4294967296;
+}
 
 function rand(min, max) {
-  return min + Math.random() * (max - min);
+  return min + (runSeedParam ? seededRandom() : Math.random()) * (max - min);
 }
 
 function pick(list) {
-  return list[Math.floor(Math.random() * list.length)];
+  return list[Math.floor((runSeedParam ? seededRandom() : Math.random()) * list.length)];
+}
+
+function chance(probability) {
+  return (runSeedParam ? seededRandom() : Math.random()) < probability;
 }
 
 function clampComponent(value: number, limit: number) {
@@ -1196,6 +1243,7 @@ function nearestThrowableProp(player) {
 }
 
 function throwBall(player, ball, target) {
+  eventCounters.ballThrows += 1;
   const from = player.group.position;
   const to = target.group.position;
   const dx = to.x - from.x;
@@ -1218,6 +1266,7 @@ function throwBall(player, ball, target) {
 }
 
 function spawnPaperBurst(position, count, baseVelocity, colorMix = false) {
+  eventCounters.particlesSpawned += count;
   for (let i = 0; i < count; i += 1) {
     const mesh = new THREE.Mesh(shared.dust, colorMix ? pick([materials.paper, materials.stickyBlue, materials.stickyPink]) : materials.paper);
     mesh.position.copy(position);
@@ -1238,6 +1287,7 @@ function spawnPaperBurst(position, count, baseVelocity, colorMix = false) {
 }
 
 function hitPlayer(player, ball) {
+  eventCounters.playerHitsByBall += 1;
   const impulse = ball.velocity.clone().multiplyScalar(0.1);
   player.velocity.add(new THREE.Vector3(impulse.x, 0, impulse.z));
   player.stun = 1.05;
@@ -1279,6 +1329,7 @@ function holdProp(player, prop) {
 }
 
 function throwProp(player, prop, target) {
+  eventCounters.propThrows += 1;
   const from = player.group.position;
   const to = target.group.position;
   const dx = to.x - from.x;
@@ -1318,6 +1369,7 @@ function throwProp(player, prop, target) {
 }
 
 function hitPlayerWithProp(player, prop) {
+  eventCounters.playerHitsByProp += 1;
   const impulse = prop.velocity.clone().multiplyScalar(0.075);
   player.velocity.add(new THREE.Vector3(impulse.x, 0, impulse.z));
   player.stun = 0.68 + Math.min(0.55, prop.velocity.length() * 0.025);
@@ -1375,6 +1427,7 @@ function resolvePropToPropImpacts(prop) {
     impulse.y = Math.max(impulse.y, isFlutterProp(other) ? rand(0.55, 1.4) : rand(0.18, 0.72));
 
     other.baseY = other.floorY;
+    eventCounters.propChainImpacts += 1;
     kickProp(other, impulse, prop.mesh.position, { force: true, dropToFloor: true });
     if (prop.team && prop.throwAge < 2.25) {
       other.team = prop.team;
@@ -1426,6 +1479,12 @@ function fragmentVelocity(position, impulse, sourcePosition, scale = 0.38) {
 function fractureProp(prop, impulse, sourcePosition) {
   if (!prop.breakable || prop.dynamic || prop.broken) return false;
 
+  eventCounters.propFractures += 1;
+  if (prop.kind.includes("wall-panel")) eventCounters.wallFractures += 1;
+  if (prop.kind.includes("desk") || prop.kind.includes("table") || prop.kind.includes("counter")) {
+    eventCounters.deskFractures += 1;
+  }
+
   prop.broken = true;
   prop.mesh.visible = false;
   prop.holder = null;
@@ -1473,6 +1532,8 @@ function fractureProp(prop, impulse, sourcePosition) {
 function fractureBarrier(barrier, impulse, sourcePosition) {
   if (!barrier.breakable || barrier.broken) return false;
 
+  eventCounters.barrierFractures += 1;
+
   barrier.broken = true;
   barrier.mesh.visible = false;
 
@@ -1513,6 +1574,7 @@ function fractureBarrier(barrier, impulse, sourcePosition) {
 function kickProp(prop, impulse, sourcePosition, options: { force?: boolean; dropToFloor?: boolean } = {}) {
   const strength = impulse.length();
   if (prop.impactCooldown > 0 && !options.force) return;
+  eventCounters.propImpacts += 1;
 
   if (options.dropToFloor || strength > 2.6 || prop.mesh.position.y > prop.floorY + 0.22) {
     prop.baseY = prop.floorY;
@@ -1602,7 +1664,7 @@ function updatePlayers(dt) {
     if (!holding && player.stun <= 0) {
       const freeBall = nearestFreeBall(player);
       const looseProp = nearestThrowableProp(player);
-      const preferProp = looseProp && (!freeBall || Math.random() < PROP_THROW_CHANCE + chaos * 0.003);
+      const preferProp = looseProp && (!freeBall || chance(PROP_THROW_CHANCE + chaos * 0.003));
 
       if (preferProp) {
         const dx = looseProp.mesh.position.x - player.group.position.x;
@@ -1610,7 +1672,7 @@ function updatePlayers(dt) {
         if (length2(dx, dz) < 1.02 + looseProp.radius * 0.32) {
           holdProp(player, looseProp);
           heldProp = looseProp;
-        } else if (Math.random() < 0.035) {
+        } else if (chance(0.035)) {
           player.target.set(looseProp.mesh.position.x, 0, looseProp.mesh.position.z);
         }
       } else if (freeBall) {
@@ -1621,14 +1683,14 @@ function updatePlayers(dt) {
           freeBall.team = player.team;
           freeBall.airborne = false;
           heldBall = freeBall;
-        } else if (Math.random() < 0.024) {
+        } else if (chance(0.024)) {
           player.target.set(freeBall.mesh.position.x, 0, freeBall.mesh.position.z);
         }
       }
     }
 
     const distToTarget = player.group.position.distanceTo(player.target);
-    if (distToTarget < 1.1 || Math.random() < 0.006) {
+    if (distToTarget < 1.1 || chance(0.006)) {
       pickNewTarget(player);
     }
 
@@ -1671,7 +1733,7 @@ function updatePlayers(dt) {
       if (overlap > 0 && dist > 0.001) {
         player.group.position.x += (dx / dist) * overlap * 0.32;
         player.group.position.z += (dz / dist) * overlap * 0.32;
-        if (prop.mass < 1.2 && player.velocity.length() > 3 && Math.random() < 0.12) {
+        if (prop.mass < 1.2 && player.velocity.length() > 3 && chance(0.12)) {
           kickProp(prop, player.velocity.clone().multiplyScalar(0.32), player.group.position);
         }
       }
@@ -1993,6 +2055,7 @@ function resetMatch() {
   blueScore = 0;
   redScore = 0;
   chaos = 0;
+  resetPlaytestCounters();
 
   for (const player of players) {
     const side = player.team === "blue" ? -1 : 1;
@@ -2051,6 +2114,7 @@ function animate(now) {
   const dt = paused ? 0 : rawDt * speedScale;
 
   if (dt > 0) {
+    matchElapsed += dt;
     gameTime -= dt;
     if (gameTime <= 0) {
       resetMatch();
@@ -2060,6 +2124,10 @@ function animate(now) {
     updateBalls(dt);
     updateProps(dt);
     updateParticles(dt);
+    peakChaos = Math.max(peakChaos, chaos);
+    if (timeToChaos80 === null && chaos >= 80) {
+      timeToChaos80 = matchElapsed;
+    }
   }
 
   resizeRenderer();
@@ -2091,6 +2159,8 @@ resetMatch();
 
 window.__voxelOfficeDodgeball = {
   metrics: () => ({
+    seed: runSeedParam,
+    matchElapsed: Number(matchElapsed.toFixed(2)),
     playerCount: players.length,
     ballCount: balls.length,
     propCount: props.length,
@@ -2105,6 +2175,16 @@ window.__voxelOfficeDodgeball = {
     blueScore,
     redScore,
     chaos: Math.round(chaos),
+    peakChaos: Math.round(peakChaos),
+    timeToChaos80: timeToChaos80 === null ? null : Number(timeToChaos80.toFixed(2)),
+    scoreSpread: Math.abs(blueScore - redScore),
+    events: { ...eventCounters },
+    eventRates: {
+      propFracturesPerMinute: Number(((eventCounters.propFractures / Math.max(1, matchElapsed)) * 60).toFixed(2)),
+      barrierFracturesPerMinute: Number(((eventCounters.barrierFractures / Math.max(1, matchElapsed)) * 60).toFixed(2)),
+      particlesPerMinute: Number(((eventCounters.particlesSpawned / Math.max(1, matchElapsed)) * 60).toFixed(2)),
+      throwsPerMinute: Number((((eventCounters.ballThrows + eventCounters.propThrows) / Math.max(1, matchElapsed)) * 60).toFixed(2)),
+    },
     cameraMode: cameraModes[cameraModeIndex],
     paused,
     textureAtlasLoaded,

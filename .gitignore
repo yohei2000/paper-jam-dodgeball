@@ -6,3 +6,4 @@ vite-dev*.err
 vite-direct*.log
 vite-direct*.err
 verification-screenshots/
+playtests/

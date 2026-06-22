@@ -11,6 +11,16 @@ npm.cmd run dev
 
 Open the printed local URL. The game starts immediately.
 
+## Playtest Loop
+
+Run an automated spectator playtest with seeded simulations, metrics, and screenshots:
+
+```powershell
+npm.cmd run playtest -- --runs=4 --duration=30
+```
+
+The playtest builds `dist/`, launches local Chrome through Playwright Core, runs seeded matches, and writes `summary.md`, `metrics.json`, per-run JSON, and screenshots under `playtests/`. Generated playtest output is ignored by git.
+
 ## Deploy
 
 This project deploys to GitHub Pages with the included Actions workflow.
