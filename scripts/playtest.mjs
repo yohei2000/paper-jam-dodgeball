@@ -147,7 +147,7 @@ function timestampForPath(date = new Date()) {
 
 function runBuild() {
   const viteCli = resolve(repoRoot, "node_modules", "vite", "bin", "vite.js");
-  const result = spawnSync(process.execPath, [viteCli, "build", "--base=/paper-jam-dodgeball/"], {
+  const result = spawnSync(process.execPath, [viteCli, "build", ".", "--base=/paper-jam-dodgeball/"], {
     cwd: repoRoot,
     stdio: "inherit",
     shell: false,

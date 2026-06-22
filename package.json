@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "vite --host 127.0.0.1",
-    "build": "vite build --base=/paper-jam-dodgeball/",
+    "build": "vite build . --base=/paper-jam-dodgeball/",
     "preview": "vite preview --host 127.0.0.1",
     "serve": "node scripts/serve-dist.mjs",
     "playtest": "node scripts/playtest.mjs",

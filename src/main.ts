@@ -112,6 +112,7 @@ const shared = {
   cylinder: new THREE.CylinderGeometry(0.5, 0.5, 1, 14),
   cone: new THREE.ConeGeometry(0.46, 0.8, 5),
   torus: new THREE.TorusGeometry(0.34, 0.035, 6, 24),
+  floorDecal: new THREE.PlaneGeometry(1, 1),
   shadow: new THREE.CircleGeometry(0.72, 24),
 };
 
@@ -524,18 +525,20 @@ function isBlockedPoint(x, z, pad = 0.75) {
   );
 }
 
-function addFloorInset(x, z, sx, sz, material, y = 0.022) {
-  makeBox({
-    size: { x: sx, y: 0.035, z: sz },
-    position: { x, y, z },
-    material,
-    cast: false,
-    parent: officeGroup,
-  });
+function addFloorInset(x, z, sx, sz, material, y = 0.058) {
+  const mesh = new THREE.Mesh(shared.floorDecal, material);
+  mesh.scale.set(sx, sz, 1);
+  mesh.rotation.x = -Math.PI / 2;
+  mesh.position.set(x, y, z);
+  mesh.castShadow = false;
+  mesh.receiveShadow = true;
+  mesh.renderOrder = 10 + Math.round(y * 1000);
+  officeGroup.add(mesh);
+  return mesh;
 }
 
 function addCourtLine(x, z, sx, sz, material = materials.safetyOrange) {
-  addStaticDetail(x, 0.075, z, sx, 0.045, sz, material);
+  addFloorInset(x, z, sx, sz, material, 0.078);
 }
 
 function isNaturallyBreakableKind(kind) {
@@ -687,11 +690,11 @@ function buildOfficeShell() {
     parent: officeGroup,
   });
 
-  addFloorInset(-9.5, 0, 17, 21.4, materials.courtBlue);
-  addFloorInset(9.5, 0, 17, 21.4, materials.courtRed);
-  addFloorInset(0, 0, 7.8, 18.8, materials.courtLane, 0.035);
-  addFloorInset(-13.2, 7.7, 8.4, 5.4, materials.carpetTeal);
-  addFloorInset(13.3, -7.6, 7.4, 5.2, materials.carpetPlum);
+  addFloorInset(-9.5, 0, 17, 21.4, materials.courtBlue, 0.022);
+  addFloorInset(9.5, 0, 17, 21.4, materials.courtRed, 0.022);
+  addFloorInset(0, 0, 7.8, 18.8, materials.courtLane, 0.042);
+  addFloorInset(-13.2, 7.7, 8.4, 5.4, materials.carpetTeal, 0.058);
+  addFloorInset(13.3, -7.6, 7.4, 5.2, materials.carpetPlum, 0.058);
 
   addCourtLine(0, 0, 0.18, 17.4, materials.paper);
   addCourtCircle(0, 0, 1.7, materials.paper);
@@ -709,8 +712,8 @@ function buildOfficeShell() {
     [5.35, materials.redTape],
   ]) {
     for (const z of [-4.8, 0, 4.8]) {
-      addFloorInset(x, z, 1.15, 1.15, material, 0.055);
-      addStaticDetail(x, 0.095, z, 0.64, 0.045, 0.64, materials.ballStripe);
+      addFloorInset(x, z, 1.15, 1.15, material, 0.072);
+      addStaticDetail(x, 0.108, z, 0.64, 0.045, 0.64, materials.ballStripe);
     }
   }
 
@@ -2112,8 +2115,7 @@ function updateCamera(dt) {
   } else if (mode === "sideline") {
     camera.position.lerp(new THREE.Vector3(0, 13.5, 25.5), 1 - Math.pow(0.001, dt));
   } else {
-    const swing = Math.sin(performance.now() * 0.00018) * 2.6;
-    camera.position.lerp(new THREE.Vector3(25.5 + swing, 22.5, 25 - swing), 1 - Math.pow(0.001, dt));
+    camera.position.lerp(new THREE.Vector3(25.5, 22.5, 25), 1 - Math.pow(0.001, dt));
   }
   camera.lookAt(target);
 }
